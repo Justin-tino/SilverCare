@@ -12,8 +12,15 @@ import { ref, get } from "https://www.gstatic.com/firebasejs/10.11.1/firebase-da
 
 const PENDING_KEY = 'sc_2fa_pending';   // JSON { uid, role, email } while the OTP challenge is open
 const VERIFIED_KEY = 'sc_2fa_verified'; // uid that completed 2FA in this tab
+const LOGIN_NOTICE_KEY = 'sc_login_notice'; // one-shot message handed to the login page (e.g. deceased account)
 const RESEND_COOLDOWN_S = 30;           // mirrors TWOFA_RESEND_MS on the server
 const DEFAULT_ADMIN_EMAIL = 'admin@silvercare.com'; // Master Admin — exempt from OTP
+const DEFAULT_EMPLOYEE_EMAIL = 'employee@silvercare.com'; // Default OSCA employee — exempt from OTP
+const OTP_EXEMPT_EMAILS = new Set([DEFAULT_ADMIN_EMAIL, DEFAULT_EMPLOYEE_EMAIL]);
+
+function isOtpExemptEmail(email) {
+    return OTP_EXEMPT_EMAILS.has(String(email || '').trim().toLowerCase());
+}
 
 const ROLE_UI = {
     admin:    { title: 'Admin Login', icon: 'fas fa-shield-alt', iconColor: '#3b82f6', buttonBg: '#3b82f6' },
@@ -67,6 +74,17 @@ function startResendCooldown(seconds = RESEND_COOLDOWN_S) {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
+    // Message handed over by another page (e.g. the Senior portal signing out an
+    // account that OSCA staff just marked deceased) — show it once, then clear it.
+    try {
+        const rawNotice = sessionStorage.getItem(LOGIN_NOTICE_KEY);
+        if (rawNotice) {
+            sessionStorage.removeItem(LOGIN_NOTICE_KEY);
+            const notice = JSON.parse(rawNotice);
+            if (notice && notice.message) scNotify(notice.type || 'error', notice.message, notice.title || 'Notice');
+        }
+    } catch (err) { /* malformed notice — ignore */ }
+
     const loginForm = document.getElementById('loginForm');
     const roleSelection = document.getElementById('roleSelection');
     const loginFormContainer = document.getElementById('loginFormContainer');
@@ -118,16 +136,28 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         if (pending && pending.uid !== user.uid) clearPending2FA();
 
-        // Already fully verified in this tab -> straight to the dashboard.
-        // The default/Master Admin account is exempt from 2FA entirely.
-        if (!is2FAVerified(user.uid) && String(user.email || '').toLowerCase() !== DEFAULT_ADMIN_EMAIL) {
+        // The explicitly provisioned admin and default employee accounts are exempt from 2FA.
+        if (!is2FAVerified(user.uid) && !isOtpExemptEmail(user.email)) {
             return; // admin/staff must finish 2FA first (dashboards enforce this too)
         }
 
         try {
             const userSnap = await get(ref(db, 'users/' + user.uid));
             if (userSnap.exists()) {
-                const role = userSnap.val().role;
+                const snapData = userSnap.val() || {};
+                // Deceased gate (Archive Function): a senior marked Deceased must
+                // never land on a dashboard even through an existing session —
+                // kick them back to the landing login with the OSCA message.
+                if (String(snapData.lifeStatus || '') === 'Deceased' || String(snapData.status || '') === 'Deceased') {
+                    clearPending2FA();
+                    try { sessionStorage.setItem(LOGIN_NOTICE_KEY, JSON.stringify({ type: 'error', title: 'Account Deceased', message: 'This senior have passed away, please go to OSCA if you think this is an error' })); } catch (e) {}
+                    try { await auth.signOut(); } catch (e) {}
+                    localStorage.removeItem('userRole');
+                    if (window.location.pathname === '/') showScreen('roles');
+                    else window.location.replace('/');
+                    return;
+                }
+                const role = snapData.role;
                 localStorage.setItem('userRole', role);
                 if (role === 'admin') window.location.href = '/admin';
                 else if (role === 'employee') window.location.href = '/employee';
@@ -190,6 +220,20 @@ document.addEventListener('DOMContentLoaded', () => {
                         return;
                     }
 
+                    // Deceased gate (Archive Function): the account of a senior who
+                    // has passed away is archived by OSCA staff — it can never be
+                    // signed in again and no longer receives pension or benefits.
+                    const isDeceasedSenior = String(userData.role || '') === 'senior'
+                        && (String(userData.lifeStatus || '') === 'Deceased' || String(userData.status || '') === 'Deceased');
+                    if (isDeceasedSenior) {
+                        await auth.signOut();
+                        localStorage.removeItem('userRole');
+                        scNotify('error', 'This senior have passed away, please go to OSCA if you think this is an error', 'Account Deceased');
+                        btn.innerHTML = originalText;
+                        btn.disabled = false;
+                        return;
+                    }
+
                     if (userData.status !== 'Active') {
                         await auth.signOut();
                         const isInactiveSenior = (userData.role === 'senior') && ((userData.status || '') === 'Inactive' || (userData.lifeStatus || '') === 'Inactive');
@@ -216,19 +260,21 @@ document.addEventListener('DOMContentLoaded', () => {
                         }
                     }
 
-                    // --- Default/Master Admin exemption: sign straight in, no OTP ---
-                    if ((userData.email || '').toLowerCase() === DEFAULT_ADMIN_EMAIL) {
+                    // --- Provisioned staff account exemption: sign straight in, no OTP ---
+                    if (isOtpExemptEmail(userData.email)) {
                         sessionStorage.removeItem(VERIFIED_KEY);
                         clearPending2FA();
 
                         // Reset login form fields before redirecting
-                        const masterEmailInput = document.getElementById('email');
-                        const masterPassInput = document.getElementById('password');
-                        if (masterEmailInput) masterEmailInput.value = '';
-                        if (masterPassInput) masterPassInput.value = '';
+                        const exemptEmailInput = document.getElementById('email');
+                        const exemptPassInput = document.getElementById('password');
+                        if (exemptEmailInput) exemptEmailInput.value = '';
+                        if (exemptPassInput) exemptPassInput.value = '';
                         if (loginForm) loginForm.reset();
 
-                        window.location.href = '/admin';
+                        if (userData.role === 'admin') window.location.href = '/admin';
+                        else if (userData.role === 'employee') window.location.href = '/employee';
+                        else window.location.href = '/senior';
                         return;
                     }
 

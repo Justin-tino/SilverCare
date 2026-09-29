@@ -615,7 +615,7 @@
         }
 
         /* ════════════════════════════════════════════
-           Benefits Showcase — Assistance + Monthly Pension + Lifetime Total
+           Benefits Showcase — Local + National Pension + Quarterly Total
            ════════════════════════════════════════════ */
         .benefits-showcase-grid {
             display: grid;
@@ -2268,12 +2268,16 @@
 
                     <!-- Row 2: Pension Release & Priority Score -->
                     <div class="dashboard-row-2">
-                        <!-- Next Pension Release / Approved Assistance Block -->
+                        <!-- Local (Monthly) + National (Quarterly) Pension Block -->
                         <div class="pension-block">
-                            <div class="block-text">
-                                <h4 id="pensionBlockTitle">Next Pension Release</h4>
+                            <div class="block-text" style="width:100%;">
+                                <h4 id="pensionBlockTitle">Pension Release</h4>
                                 <h2 id="pensionDate">Loading...</h2>
-                                <p id="pensionAmount">Loading...</p>
+                                <div id="pensionDualLines" style="display:flex; flex-direction:column; gap:6px; margin-top:4px;">
+                                    <p id="pensionLocalLine" style="margin:0; font-size:1rem; font-weight:600;">Local (Monthly): Loading...</p>
+                                    <p id="pensionNationalLine" style="margin:0; font-size:1rem; font-weight:600;">National (Quarterly): Loading...</p>
+                                    <p id="pensionAmount" style="margin:4px 0 0; font-size:0.95rem; font-weight:700; opacity:0.95;">Quarterly Total: Loading...</p>
+                                </div>
                             </div>
                             <i class="far fa-calendar-alt block-icon" id="pensionBlockIcon"></i>
                         </div>
@@ -2504,7 +2508,7 @@
                     </div>
                 </div>
 
-                <!-- TAB: BENEFITS — Showcase: Assistance + Monthly Pension + Lifetime Total -->
+                <!-- TAB: BENEFITS — Local Pension + National Pension + Assistance + Quarterly Total -->
                 <div class="tab-panel" id="panel-benefits">
                     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:18px; flex-wrap:wrap; gap:10px;">
                         <div>
@@ -2514,13 +2518,32 @@
                         <span style="font-size:0.7rem; font-weight:700; color:#166534; background:#dcfce7; border:1px solid #bbf7d0; padding:6px 12px; border-radius:20px; display:inline-flex; align-items:center; gap:6px;"><span style="width:7px; height:7px; background:#22c55e; border-radius:50%; display:inline-block;"></span> Live &amp; auto-updating</span>
                     </div>
 
-                    <!-- Summary cards: Monthly Pension + Assistance + Lifetime Total -->
-                    <div class="benefits-showcase-grid">
-                        <!-- Monthly Pension -->
+                    <!-- Summary cards: Local Pension + National Pension + Assistance + Lifetime Total -->
+                    <div class="benefits-showcase-grid" style="grid-template-columns: repeat(4, 1fr);">
+                        <!-- Local Pension (Monthly) -->
                         <div class="benefits-summary-card card-pension">
                             <div class="summary-icon"><i class="fas fa-hand-holding-dollar"></i></div>
                             <div class="summary-content">
-                                <span class="summary-label">Monthly Pension</span>
+                                <span class="summary-label">Local Pension (Monthly)</span>
+                                <span class="summary-value" id="showcaseLocalAmount">—</span>
+                                <span class="summary-sub" id="showcaseLocalStatus">Checking status...</span>
+                            </div>
+                            <span class="summary-badge badge-pending" id="showcaseLocalBadge">Pending</span>
+                        </div>
+                        <!-- National Pension (Quarterly) -->
+                        <div class="benefits-summary-card card-pension">
+                            <div class="summary-icon" style="background:#e0e7ff; color:#4f46e5;"><i class="fas fa-landmark"></i></div>
+                            <div class="summary-content">
+                                <span class="summary-label">National Pension (Quarterly)</span>
+                                <span class="summary-value" id="showcaseNationalAmount">—</span>
+                                <span class="summary-sub" id="showcaseNationalStatus">Checking status...</span>
+                            </div>
+                            <span class="summary-badge badge-pending" id="showcaseNationalBadge">Pending</span>
+                        </div>
+                        <!-- Legacy combined (kept hidden for backward-compat with senior.js) -->
+                        <div class="benefits-summary-card card-pension" style="display:none;" aria-hidden="true">
+                            <div class="summary-content">
+                                <span class="summary-label">Legacy Combined Pension</span>
                                 <span class="summary-value" id="showcasePensionAmount">—</span>
                                 <span class="summary-sub" id="showcasePensionStatus">Checking status...</span>
                             </div>
@@ -2535,13 +2558,13 @@
                                 <span class="summary-sub" id="showcaseAssistanceTotal">₱0 total assistance</span>
                             </div>
                         </div>
-                        <!-- Lifetime Total -->
+                        <!-- Quarterly Pension Total -->
                         <div class="benefits-summary-card card-total">
                             <div class="summary-icon"><i class="fas fa-coins"></i></div>
                             <div class="summary-content">
-                                <span class="summary-label">Lifetime Total Received</span>
+                                <span class="summary-label">Quarterly Pension Total</span>
                                 <span class="summary-value" id="showcaseLifetimeTotal">₱0</span>
-                                <span class="summary-sub">From first to latest • updates on every new claim</span>
+                                <span class="summary-sub">Local 3 months + National quarterly</span>
                             </div>
                         </div>
                     </div>
@@ -2550,7 +2573,7 @@
                     <div class="benefits-history-grid">
                         <div class="benefits-history-card">
                             <div class="history-card-header">
-                                <h4><i class="fas fa-calendar-alt"></i> Monthly Pension History</h4>
+                                <h4><i class="fas fa-calendar-alt"></i> Pension Release History</h4>
                                 <span class="history-count" id="pensionHistoryCount">0 records</span>
                             </div>
                             <div class="history-list" id="pensionHistoryList">
@@ -2845,7 +2868,7 @@
                                         <label class="kyc-label">Date of Birth <span class="kyc-required">*</span></label>
                                         <input type="date" id="kycDob" class="kyc-input" required>
                                         <div id="kycAgeReadout" class="kyc-age-readout" aria-live="polite"></div>
-                                        <p class="kyc-id-hint" style="margin-top:6px;">No need to type your age — the system computes it automatically from this birthdate (must be 50+ to continue).</p>
+                                        <p class="kyc-id-hint" style="margin-top:6px;">No need to type your age — the system computes it automatically from this birthdate (must be 60+ to continue).</p>
                                     </div>
 
                                     <div class="kyc-field">

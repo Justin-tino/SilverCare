@@ -156,6 +156,25 @@ document.addEventListener('DOMContentLoaded', () => {
             if (snapshot.exists()) {
                 currentUserData = snapshot.val();
                 currentUserData.uid = user.uid;
+                // Deceased gate (Archive Function): OSCA staff marked this account
+                // as deceased — it is archived, stops receiving pension/benefits,
+                // and must not keep a live session open. The person is sent back
+                // to the login page with the OSCA message.
+                if (String(currentUserData.lifeStatus || '') === 'Deceased'
+                    || String(currentUserData.status || '') === 'Deceased') {
+                    if (!window.__scDeceasedKickout) {
+                        window.__scDeceasedKickout = true;
+                        const deceaseNotice = {
+                            type: 'error',
+                            title: 'Account Deceased',
+                            message: 'This senior have passed away, please go to OSCA if you think this is an error'
+                        };
+                        try { sessionStorage.setItem('sc_login_notice', JSON.stringify(deceaseNotice)); } catch (e) {}
+                        try { if (typeof scNotify === 'function') scNotify('error', deceaseNotice.message, deceaseNotice.title); } catch (e) {}
+                        auth.signOut().then(() => window.location.replace('/')).catch(() => window.location.replace('/'));
+                    }
+                    return;
+                }
                 populatePortalData(currentUserData);
                 populateProfileInputs(currentUserData);
                 renderBenefitsAndNotifications(currentUserData);
@@ -267,6 +286,23 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+    // — Dual pension helpers: Local (monthly) + National (quarterly) —
+    // Local ₱1,000/mo default, National ₱3,000/qtr default.
+    // Quarterly total = Local×3 + National = ₱6,000 (sum for the quarter).
+    function seniorLocalPension(userData) {
+        if (!userData) return 0;
+        if (Number(userData.pensionLocalAmount) > 0) return Number(userData.pensionLocalAmount);
+        if (Number(userData.pensionAmount) > 0) return Number(userData.pensionAmount);
+        return 0;
+    }
+    function seniorNationalPension(userData) {
+        if (!userData) return 0;
+        if (Number(userData.pensionNationalAmount) > 0) return Number(userData.pensionNationalAmount);
+        return 0;
+    }
+    function seniorQuarterlyTotal(userData) {
+        return seniorLocalPension(userData) * 3 + seniorNationalPension(userData);
+    }
     function checkIsPensionApproved(userData) {
         if (!userData) return false;
         const currentMonth = new Date().toISOString().substring(0, 7);
@@ -405,8 +441,12 @@ document.addEventListener('DOMContentLoaded', () => {
         const dashPensionAmount = document.getElementById('pensionAmount');
         const dashPensionIcon = document.getElementById('pensionBlockIcon');
         const isApproved = checkIsPensionApproved(data);
-        // Monthly pension configured by OSCA staff (Process Benefits > Monthly Pension Setup)
-        const configuredPension = Number(data.pensionAmount) || 0;
+        // Dual pension granted on verification: Local (monthly) + National (quarterly)
+        const localPension = seniorLocalPension(data);
+        const nationalPension = seniorNationalPension(data);
+        const qtrTotal = localPension * 3 + nationalPension;
+        const hasAnyPension = localPension > 0 || nationalPension > 0;
+        const hasDualPension = localPension > 0 && nationalPension > 0;
 
         // Check if senior has any approved assistance benefits (e.g., Burial Assistance) that are NOT claimed
         let latestBenefit = null;
@@ -422,24 +462,26 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         }
 
-        if (isApproved || configuredPension > 0) {
-            // Senior has a monthly pension (configured by OSCA staff and/or
-            // approved this month) — show the next monthly release window
-            if (dashPensionTitle) dashPensionTitle.textContent = 'Next Pension Release';
+        if (isApproved || hasAnyPension) {
+            // Senior has Local + National pension — show both lines + quarterly total
+            if (dashPensionTitle) dashPensionTitle.textContent = 'Pension Release';
             if (dashPensionDate) dashPensionDate.textContent = pensionDateStr;
+            const dashLocal = document.getElementById('pensionLocalLine');
+            const dashNat = document.getElementById('pensionNationalLine');
+            if (dashLocal) dashLocal.textContent = localPension > 0
+                ? `Local (Monthly): ₱${localPension.toLocaleString()}`
+                : 'Local (Monthly): —';
+            if (dashNat) dashNat.textContent = nationalPension > 0
+                ? `National (Quarterly): ₱${nationalPension.toLocaleString()}`
+                : 'National (Quarterly): —';
             if (dashPensionAmount) {
-                if (configuredPension > 0) {
-                    dashPensionAmount.textContent = isApproved
-                        ? `Amount: ₱${configuredPension.toLocaleString()} (Approved)`
-                        : `Amount: ₱${configuredPension.toLocaleString()} monthly (Active)`;
-                } else {
-                    // Approved this month but OSCA hasn't set an amount yet
-                    dashPensionAmount.textContent = 'Amount: To be confirmed by OSCA';
-                }
+                dashPensionAmount.textContent = qtrTotal > 0
+                    ? `Quarterly Total: ₱${qtrTotal.toLocaleString()}${isApproved ? ' (Approved)' : (hasDualPension ? ' (Active)' : ' (Setup incomplete)')}`
+                    : 'Amount: To be confirmed by OSCA';
             }
             if (dashPensionIcon) dashPensionIcon.className = 'far fa-calendar-alt block-icon';
         } else if (latestBenefit) {
-            // No monthly pension — show the latest approved assistance instead
+            // No pension configured — show the latest approved assistance instead
             const dateStr = latestBenefit.approvedAt ? new Date(latestBenefit.approvedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : 'Approved';
             if (dashPensionTitle) dashPensionTitle.textContent = 'Approved Assistance';
             if (dashPensionDate) dashPensionDate.textContent = latestBenefit.amount
@@ -448,10 +490,14 @@ document.addEventListener('DOMContentLoaded', () => {
             if (dashPensionAmount) dashPensionAmount.textContent = `Status: Approved on ${dateStr}`;
             if (dashPensionIcon) dashPensionIcon.className = 'fas fa-hand-holding-heart block-icon';
         } else {
-            // No monthly pension and no approved assistance yet
-            if (dashPensionTitle) dashPensionTitle.textContent = 'Monthly Pension';
+            // No pension and no approved assistance yet
+            if (dashPensionTitle) dashPensionTitle.textContent = 'Pension';
             if (dashPensionDate) dashPensionDate.textContent = 'No available pension yet';
-            if (dashPensionAmount) dashPensionAmount.textContent = 'Awaiting OSCA pension setup';
+            const _dl = document.getElementById('pensionLocalLine');
+            const _dn = document.getElementById('pensionNationalLine');
+            if (_dl) _dl.textContent = 'Local (Monthly): Awaiting verification';
+            if (_dn) _dn.textContent = 'National (Quarterly): Awaiting verification';
+            if (dashPensionAmount) dashPensionAmount.textContent = 'Get verified to receive your pension';
             if (dashPensionIcon) dashPensionIcon.className = 'far fa-calendar-alt block-icon';
         }
 
@@ -861,8 +907,8 @@ document.addEventListener('DOMContentLoaded', () => {
         const benefitsContainer = document.getElementById('benefitsContainer');
         const dashActiveBenefits = document.getElementById('dashActiveBenefits');
 
-        // ── Benefits Showcase: Assistance + Monthly Pension + Lifetime Total ──
-        // Lifetime total = sum of ALL approved/claimed benefits from first to last.
+        // ── Benefits Showcase: Local + National Pension + Assistance + Quarterly Total ──
+        // Quarterly allocation is shown separately from released history totals.
         // Auto-updates whenever a new pension/assistance is claimed (re-rendered on RTDB onValue).
         function parseBenefitAmount(val) {
             if (val == null) return 0;
@@ -907,9 +953,11 @@ document.addEventListener('DOMContentLoaded', () => {
         assistanceBenefits.sort((a,b) => getBenefitDate(b) - getBenefitDate(a));
         countable.sort((a,b) => getBenefitDate(a) - getBenefitDate(b));
 
-        // Monthly pension configured by OSCA staff (Process Benefits > Monthly Pension Setup)
-        const configuredPensionAmt = Number(userData.pensionAmount) || 0;
-        const pensionIsActive = isPensionApproved || configuredPensionAmt > 0;
+        // Dual pension granted on verification (Local monthly + National quarterly)
+        const cfgLocal = seniorLocalPension(userData);
+        const cfgNational = seniorNationalPension(userData);
+        const cfgQuarter = cfgLocal * 3 + cfgNational;
+        const pensionIsActive = isPensionApproved || cfgLocal > 0 || cfgNational > 0;
 
         let pensionTotal = 0, assistanceTotal = 0;
         pensionBenefits.forEach(b => { pensionTotal += parseBenefitAmount(b.amount); });
@@ -920,27 +968,44 @@ document.addEventListener('DOMContentLoaded', () => {
         // Keep legacy hidden container in sync (for tests) but don't show old cards
         if (benefitsContainer) { benefitsContainer.innerHTML = ''; }
 
-        // — Summary cards —
+        // — Summary cards: Local + National + Assistance + Quarterly Total —
+        const elLocalAmt = document.getElementById('showcaseLocalAmount');
+        const elLocalStatus = document.getElementById('showcaseLocalStatus');
+        const elLocalBadge = document.getElementById('showcaseLocalBadge');
+        const elNatAmt = document.getElementById('showcaseNationalAmount');
+        const elNatStatus = document.getElementById('showcaseNationalStatus');
+        const elNatBadge = document.getElementById('showcaseNationalBadge');
         const elPensionAmt = document.getElementById('showcasePensionAmount');
         const elPensionStatus = document.getElementById('showcasePensionStatus');
         const elPensionBadge = document.getElementById('showcasePensionBadge');
         const elAssistanceCount = document.getElementById('showcaseAssistanceCount');
         const elAssistanceTotal = document.getElementById('showcaseAssistanceTotal');
         const elLifetimeTotal = document.getElementById('showcaseLifetimeTotal');
+        if (elLocalAmt) elLocalAmt.textContent = cfgLocal > 0 ? formatPHP(cfgLocal) + '/mo' : '—';
+        if (elLocalStatus) {
+            elLocalStatus.textContent = cfgLocal > 0 ? (isPensionApproved ? 'Approved • Released monthly' : 'Active • Every month') : 'No local pension yet';
+        }
+        if (elLocalBadge) {
+            if (cfgLocal > 0) { elLocalBadge.textContent = isPensionApproved ? 'Approved' : 'Active'; elLocalBadge.className = 'summary-badge badge-approved'; }
+            else { elLocalBadge.textContent = 'No record'; elLocalBadge.className = 'summary-badge badge-none'; }
+        }
+        if (elNatAmt) elNatAmt.textContent = cfgNational > 0 ? formatPHP(cfgNational) + '/qtr' : '—';
+        if (elNatStatus) {
+            elNatStatus.textContent = cfgNational > 0 ? (isPensionApproved ? 'Approved • Every 3 months' : 'Active • Every 3 months') : 'No national pension yet';
+        }
+        if (elNatBadge) {
+            if (cfgNational > 0) { elNatBadge.textContent = isPensionApproved ? 'Approved' : 'Active'; elNatBadge.className = 'summary-badge badge-approved'; }
+            else { elNatBadge.textContent = 'No record'; elNatBadge.className = 'summary-badge badge-none'; }
+        }
         if (elPensionAmt) {
-            // Prefer staff-configured monthly pension, then most recent pension
-            // release; show an em dash when no pension exists at all
-            const recentPensionAmt = configuredPensionAmt > 0
-                ? configuredPensionAmt
-                : (pensionBenefits[0] ? parseBenefitAmount(pensionBenefits[0].amount) : 0);
-            elPensionAmt.textContent = recentPensionAmt > 0 ? formatPHP(recentPensionAmt) : '—';
+            elPensionAmt.textContent = cfgQuarter > 0 ? formatPHP(cfgQuarter) : '—';
         }
         if (elPensionStatus) {
             if (isPensionApproved) {
                 const mName = new Date().toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
                 elPensionStatus.textContent = 'Approved for ' + mName + ' • Released';
-            } else if (configuredPensionAmt > 0) {
-                elPensionStatus.textContent = `₱${configuredPensionAmt.toLocaleString()} monthly pension configured by OSCA • Awaiting next release`;
+            } else if (cfgQuarter > 0) {
+                elPensionStatus.textContent = `Local ₱${cfgLocal.toLocaleString()}/mo + National ₱${cfgNational.toLocaleString()}/qtr • Quarterly total ₱${cfgQuarter.toLocaleString()}`;
             } else if (pensionBenefits.length > 0) {
                 const lastDate = pensionBenefits[0] ? new Date(getBenefitDate(pensionBenefits[0])).toLocaleDateString('en-US', { month: 'short', year: 'numeric' }) : '';
                 elPensionStatus.textContent = lastDate ? 'Last pension: ' + lastDate + ' • Awaiting next release' : 'No release this month • Awaiting admin';
@@ -950,7 +1015,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         if (elPensionBadge) {
             if (isPensionApproved) { elPensionBadge.textContent = 'Approved'; elPensionBadge.className = 'summary-badge badge-approved'; }
-            else if (configuredPensionAmt > 0) { elPensionBadge.textContent = 'Active'; elPensionBadge.className = 'summary-badge badge-approved'; }
+            else if (cfgQuarter > 0) { elPensionBadge.textContent = 'Active'; elPensionBadge.className = 'summary-badge badge-approved'; }
             else if (pensionBenefits.length > 0) { elPensionBadge.textContent = 'Pending'; elPensionBadge.className = 'summary-badge badge-pending'; }
             else { elPensionBadge.textContent = 'No record'; elPensionBadge.className = 'summary-badge badge-none'; }
         }
@@ -961,7 +1026,7 @@ document.addEventListener('DOMContentLoaded', () => {
             elAssistanceTotal.textContent = formatPHP(assistanceTotal) + ' total assistance';
         }
         if (elLifetimeTotal) {
-            elLifetimeTotal.textContent = formatPHP(lifetimeTotal);
+            elLifetimeTotal.textContent = formatPHP(cfgQuarter > 0 ? cfgQuarter : lifetimeTotal);
         }
 
         // — Pension History List —
@@ -969,9 +1034,9 @@ document.addEventListener('DOMContentLoaded', () => {
         const pensionCountEl = document.getElementById('pensionHistoryCount');
         if (pensionList) {
             if (pensionBenefits.length === 0) {
-                pensionList.innerHTML = configuredPensionAmt > 0
-                    ? `<div class="benefits-empty-state"><i class="fas fa-calendar"></i><p>No pension records yet</p><span>₱${configuredPensionAmt.toLocaleString()} monthly pension is configured by OSCA — releases will appear here</span></div>`
-                    : '<div class="benefits-empty-state"><i class="fas fa-calendar"></i><p>No pension records yet</p><span>Approved monthly pensions will appear here from first to latest</span></div>';
+                pensionList.innerHTML = cfgQuarter > 0
+                    ? `<div class="benefits-empty-state"><i class="fas fa-calendar"></i><p>No pension records yet</p><span>Local ₱${cfgLocal.toLocaleString()}/mo + National ₱${cfgNational.toLocaleString()}/qtr — releases will appear here</span></div>`
+                    : '<div class="benefits-empty-state"><i class="fas fa-calendar"></i><p>No pension records yet</p><span>Approved pensions will appear here from first to latest</span></div>';
             } else {
                 pensionList.innerHTML = pensionBenefits.map(b => {
                     const bAmt = parseBenefitAmount(b.amount);
@@ -1092,17 +1157,19 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // Static default notifications (if not dismissed)
         let staticNotifs = '';
-        const configuredPensionNotif = Number(userData.pensionAmount) || 0;
+        const notifLocal = seniorLocalPension(userData);
+        const notifNat = seniorNationalPension(userData);
+        const notifQtr = notifLocal * 3 + notifNat;
         const pensionNotifDesc = isPensionApproved
-            ? `Your ${monthName} pension will be released on ${pensionDateStr}`
-            : (configuredPensionNotif > 0
-                ? `₱${configuredPensionNotif.toLocaleString()} monthly pension is active. Next release: ${pensionDateStr}.`
-                : 'No available pension yet. Awaiting OSCA pension setup.');
+            ? `Your Local ₱${notifLocal.toLocaleString()}/month + National ₱${notifNat.toLocaleString()}/quarter will be released on ${pensionDateStr}`
+            : (notifQtr > 0
+                ? `Local ₱${notifLocal.toLocaleString()}/mo + National ₱${notifNat.toLocaleString()}/qtr. Next release: ${pensionDateStr}.`
+                : 'No available pension yet. Get verified to receive your pension.');
         if (!dismissed.includes('static_pension')) {
             staticNotifs += `
                 <div class="notif-item clickable-notif" data-key="static_pension" data-is-dynamic="false" data-title="Pension Release" data-desc="${pensionNotifDesc}" data-time="2 hours ago" data-icon="fa-dollar-sign" data-type="benefit" style="cursor: pointer;">
                     <div class="notif-left">
-                        <div class="notif-icon-circle" style="${(isPensionApproved || configuredPensionNotif > 0) ? 'background:#e6f4ea; color:#137333;' : 'background:#fee2e2; color:#ef4444;'}"><i class="fas fa-dollar-sign"></i></div>
+                        <div class="notif-icon-circle" style="${(isPensionApproved || notifQtr > 0) ? 'background:#e6f4ea; color:#137333;' : 'background:#fee2e2; color:#ef4444;'}"><i class="fas fa-dollar-sign"></i></div>
                         <div>
                             <div class="notif-title">Pension Release</div>
                             <div class="notif-desc">${pensionNotifDesc}</div>
@@ -3781,13 +3848,13 @@ document.addEventListener('DOMContentLoaded', () => {
             // back-to-back ID check, so seniors are not blocked at Step 1.
 
             // Age is auto-computed from the birthdate above — it is never typed,
-            // so a "0 age" is impossible. Under 50 = not eligible as a senior.
+            // so a "0 age" is impossible. Under 60 = not eligible as a senior.
             if (ageVal === null || ageVal === undefined || isNaN(ageVal)) {
                 showToast('⚠️ Please enter a valid Date of Birth so your age can be computed.');
                 document.getElementById('kycDob').focus();
                 return;
             }
-            if (ageVal < 50) {
+            if (ageVal < 60) {
                 showToast("You're not eligible. You must be a senior.");
                 document.getElementById('kycDob').focus();
                 return;
@@ -3808,7 +3875,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Live age readout under the birthdate field: the senior only picks a
     // birthdate; the system shows the auto-computed age (and the
-    // under-50 ineligibility notice) immediately while typing.
+    // under-60 ineligibility notice) immediately while typing.
     const kycDobEl = document.getElementById('kycDob');
     if (kycDobEl && !kycDobEl.dataset.ageReadoutWired) {
         kycDobEl.dataset.ageReadoutWired = '1';
@@ -3824,7 +3891,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (kycDobEl.value) readout.classList.add('bad');
                 return;
             }
-            if (liveAge < 50) {
+            if (liveAge < 60) {
                 readout.textContent = `Computed age: ${liveAge} — You're not eligible. You must be a senior.`;
                 readout.classList.add('bad');
                 return;
@@ -4465,7 +4532,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // Age is auto-computed from the birthdate — never typed, so a "0 age"
         // is impossible. Defense-in-depth: recompute it here too and enforce
-        // the same 50+ eligibility rule as Step 1.
+        // the same 60+ eligibility rule as Step 1.
         // NOTE: this runs BEFORE the submit button is disabled, so no reset needed.
         let age = computeAgeFromDobValue(dob);
         if (age === null || age === undefined || isNaN(age)) {
@@ -4473,7 +4540,7 @@ document.addEventListener('DOMContentLoaded', () => {
             goToKycStep(1);
             return;
         }
-        if (age < 50) {
+        if (age < 60) {
             showToast("You're not eligible. You must be a senior.");
             goToKycStep(1);
             return;

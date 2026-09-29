@@ -1,6 +1,14 @@
 import { auth, db } from './firebase-init.js';
 import { ref, get, onValue, update, remove } from "https://www.gstatic.com/firebasejs/10.11.1/firebase-database.js";
 
+const OTP_EXEMPT_EMAILS = new Set([
+    'admin@silvercare.com',
+    'employee@silvercare.com'
+]);
+function isOtpExemptEmail(email) {
+    return OTP_EXEMPT_EMAILS.has(String(email || '').trim().toLowerCase());
+}
+
 // Helper: Generate professional, unique claim reference numbers
 function generateReferenceNumber(prefix = 'REF') {
     const chars = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ';
@@ -601,9 +609,8 @@ document.addEventListener('DOMContentLoaded', () => {
             window.location.replace('/');
             return;
         }
-        // Two-Factor Authentication gate: without a verified OTP in this
-        // tab, the dashboard is locked and the session is terminated.
-        if (sessionStorage.getItem('sc_2fa_verified') !== user.uid) {
+        // The explicitly provisioned admin and default employee accounts do not require OTP.
+        if (!isOtpExemptEmail(user.email) && sessionStorage.getItem('sc_2fa_verified') !== user.uid) {
             sessionStorage.removeItem('sc_2fa_pending');
             try { await auth.signOut(); } catch (err) { console.error(err); }
             window.location.replace('/');
@@ -1365,7 +1372,9 @@ function renderEmployeeDashboard(usersData) {
     // they uploaded so staff can set the official health + priority level.
     if (window.renderHealthRequests) window.renderHealthRequests();
 
-    // ── Render Monthly Pension Setup (Process Benefits) ─────────────────────
+    // ── Render Dual Pension Setup (Process Benefits) ──────────────────────────
+    initPensionSettingsEditor();
+    ensureVerifiedSeniorsHavePension(usersData);
     renderPensionSetup(usersData);
 
     // ── Dashboard overview (stat cards + charts) ──────────────────────────
@@ -2192,20 +2201,43 @@ window.closePrioritySeniorModal = function() {
     if (modal) modal.style.display = 'none';
 };
 
-// ── Senior pension decision notices (in-app + e-mail) ────────────────────────
-// Staff pension actions (set / change / remove) now reach the senior twice:
-//   1. an in-app notification on their portal, and
-//   2. the official status e-mail via /api/send-status-email (server.js renders
-//      the same pension_approved / pension_declined templates used elsewhere).
-// Both are best-effort and non-blocking — a failed e-mail never blocks the save.
-function sendSeniorPensionStatus(seniorsArr, uid, seniorName, amount, type) {
+// ── Senior pension decision notices (in-app + e-mail + SMS) ──────────────────
+// Staff pension actions (set / change / remove) now reach the senior three ways:
+//   1. an in-app notification on their portal,
+//   2. the official status e-mail via /api/send-status-email, and
+//   3. an official SMS via /api/send-status-sms (TextBee) to the CP number
+//      saved in the senior's own profile (users/{uid}/cpNumber).
+// All three are best-effort and non-blocking — a failed e-mail or an offline
+// SMS gateway never blocks the pension save.
+//   - granted / changed  -> 'pension_approved'
+//   - payout preparing   -> 'pension_releasing'
+//   - payout handed over -> 'pension_released'
+//   - setup removed      -> 'pension_declined'
+const SMS_PENSION_TYPES = ['pension_approved', 'pension_releasing', 'pension_released', 'pension_declined'];
+
+function sendSeniorPensionStatus(seniorsArr, uid, seniorName, pension, type) {
     try {
-        const approved = type === 'pension_approved';
+        const p = pension && typeof pension === 'object' ? pension : {};
+        const local = Math.max(0, Number(p.localAmount) || 0);
+        const national = Math.max(0, Number(p.nationalAmount) || 0);
+        const quarterly = Math.max(0, Number(p.quarterlyTotal) || (local * 3 + national));
+        // Optional payout window (e.g. "2026-09") used by the releasing/released notices.
+        const smsPeriod = typeof p.period === 'string' ? p.period : '';
+        const amountLabel = quarterly > 0
+            ? `Local PHP ${local.toLocaleString()}/month + National PHP ${national.toLocaleString()}/quarter (quarterly total PHP ${quarterly.toLocaleString()})`
+            : 'your pension setup';
+        // In-app wording per decision — the e-mail and SMS use their own templates.
+        const pensionWindow = smsPeriod ? ` for ${smsPeriod}` : '';
+        const notice = type === 'pension_releasing'
+            ? { title: 'Pension Releasing', description: `Your pension payout${pensionWindow} is now being released. Wait for the release confirmation before going to the OSCA office.` }
+            : (type === 'pension_released'
+                ? { title: 'Pension Released ✓', description: `Your pension payout${pensionWindow} has been released. Present your OSCA ID or QR Digital ID at the OSCA Magalang office to claim.` }
+                : (type === 'pension_approved'
+                    ? { title: 'Pension Setup Approved', description: `Your dual pension setup has been approved by OSCA staff: ${amountLabel}. Please check your email and SMS for the official notice.` }
+                    : { title: 'Pension Setup Removed', description: 'Your Local/National pension setup was removed by OSCA staff. Please visit the OSCA Magalang office for assistance.' }));
         update(ref(db, `users/${uid}/notifications/notif_${Date.now()}`), {
-            title: approved ? 'Monthly Pension Approved' : 'Monthly Pension Setup Removed',
-            description: approved
-                ? `Your monthly pension of PHP ${Number(amount).toLocaleString()} has been approved by OSCA staff. Please check your email for the official notice.`
-                : 'Your monthly pension setup was removed by OSCA staff. Please visit the OSCA Magalang office for assistance.',
+            title: notice.title,
+            description: notice.description,
             createdAt: Date.now()
         }).catch(console.error);
 
@@ -2215,7 +2247,36 @@ function sendSeniorPensionStatus(seniorsArr, uid, seniorName, amount, type) {
                 return fetch('/api/send-status-email', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
-                    body: JSON.stringify({ email: senior.email, name: seniorName, amount: String(amount || 0), type })
+                    body: JSON.stringify({
+                        email: senior.email,
+                        name: seniorName,
+                        amount: String(quarterly || 0),
+                        localAmount: String(local || 0),
+                        nationalAmount: String(national || 0),
+                        quarterlyTotal: String(quarterly || 0),
+                        type
+                    })
+                });
+            }).catch(console.error);
+        }
+
+        // 3. Official SMS (TextBee). The server reads the CP number from the
+        //    senior's own profile, so only the uid + decision travel from here.
+        //    Best-effort: a silent gateway never blocks the pension save.
+        if (auth.currentUser) {
+            auth.currentUser.getIdToken().then(token => {
+                return fetch('/api/send-status-sms', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+                    body: JSON.stringify({
+                        uid,
+                        type: SMS_PENSION_TYPES.includes(type) ? type : 'pension_approved',
+                        amount: String(quarterly || 0),
+                        localAmount: String(local || 0),
+                        nationalAmount: String(national || 0),
+                        quarterlyTotal: String(quarterly || 0),
+                        period: smsPeriod
+                    })
                 });
             }).catch(console.error);
         }
@@ -2224,9 +2285,129 @@ function sendSeniorPensionStatus(seniorsArr, uid, seniorName, amount, type) {
     }
 }
 
-// ── Monthly Pension Setup (Process Benefits) ──────────────────────────────────
-// Verified seniors are listed; employees set the exact monthly pension amount.
-// A senior "has a pension" once users/{uid}/pensionAmount is set.
+// ── Dual Pension Setup (Process Benefits) ──
+// Local: monthly (₱1,000 default). National: quarterly (₱3,000 default).
+// One quarter = Local x 3 + National = ₱6,000.
+// Global amounts: pensionSettings/{local, national}. Saving updates ALL seniors.
+// Verified seniors auto-receive both pensions (auto-grant on verify + on load).
+const DEFAULT_LOCAL_PENSION = 1000;
+const DEFAULT_NATIONAL_PENSION = 3000;
+let pensionSettingsCache = { local: 1000, national: 3000 };
+
+function getLocalPensionOf(u) {
+    if (!u) return 0;
+    if (Number(u.pensionLocalAmount) > 0) return Number(u.pensionLocalAmount);
+    if (Number(u.pensionAmount) > 0) return Number(u.pensionAmount);
+    return 0;
+}
+function getNationalPensionOf(u) {
+    if (!u) return 0;
+    if (Number(u.pensionNationalAmount) > 0) return Number(u.pensionNationalAmount);
+    return 0;
+}
+function hasPension(u) { return getLocalPensionOf(u) > 0 && getNationalPensionOf(u) > 0; }
+function quarterTotalOf(u) { return getLocalPensionOf(u) * 3 + getNationalPensionOf(u); }
+function refreshPensionSettingsPreview() {
+    const li = document.getElementById('pensionLocalInput');
+    const ni = document.getElementById('pensionNationalInput');
+    const local = Math.max(0, Math.round(Number(li && li.value) || 0));
+    const nat = Math.max(0, Math.round(Number(ni && ni.value) || 0));
+    const lq = document.getElementById('pensionLocalQtrPreview');
+    const gq = document.getElementById('pensionQuarterGrandPreview');
+    const mini = document.getElementById('pbMiniPensionSettings');
+    if (lq) lq.textContent = '₱' + (local * 3).toLocaleString();
+    if (gq) gq.textContent = '₱' + (local * 3 + nat).toLocaleString();
+    if (mini) mini.textContent = 'Local ₱' + local.toLocaleString() + '/mo · National ₱' + nat.toLocaleString() + '/quarter';
+}
+
+function initPensionSettingsEditor() {
+    if (initPensionSettingsEditor._done) { refreshPensionSettingsPreview(); return; }
+    initPensionSettingsEditor._done = true;
+    try {
+        onValue(ref(db, 'pensionSettings'), (snap) => {
+            const v = snap.exists() ? snap.val() : {};
+            const L = Number(v.local) > 0 ? Math.round(Number(v.local)) : 1000;
+            const N = Number(v.national) > 0 ? Math.round(Number(v.national)) : 3000;
+            pensionSettingsCache = { local: L, national: N };
+            const li = document.getElementById('pensionLocalInput');
+            const ni = document.getElementById('pensionNationalInput');
+            if (li && document.activeElement !== li) li.value = L;
+            if (ni && document.activeElement !== ni) ni.value = N;
+            refreshPensionSettingsPreview();
+        });
+    } catch (e) { console.warn('Pension settings skipped:', e.message); }
+    const li = document.getElementById('pensionLocalInput');
+    const ni = document.getElementById('pensionNationalInput');
+    if (li) li.addEventListener('input', refreshPensionSettingsPreview);
+    if (ni) ni.addEventListener('input', refreshPensionSettingsPreview);
+    const sb = document.getElementById('pensionSettingsSaveBtn');
+    if (sb) sb.addEventListener('click', savePensionSettingsGlobal);
+    refreshPensionSettingsPreview();
+}
+async function savePensionSettingsGlobal() {
+    const li = document.getElementById('pensionLocalInput');
+    const ni = document.getElementById('pensionNationalInput');
+    const st = document.getElementById('pensionSettingsStatus');
+    const sb = document.getElementById('pensionSettingsSaveBtn');
+    const local = Math.round(Number(li && li.value));
+    const national = Math.round(Number(ni && ni.value));
+    if (!(local > 0) || !(national > 0)) {
+        scNotify('error', 'Enter valid amounts greater than 0 for both pensions.');
+        return;
+    }
+    const by = (window.currentStaffName || '').trim() || 'OSCA Staff';
+    const qtr = local * 3 + national;
+    confirmAction('Save changes? Local ₱' + local.toLocaleString() + '/mo + National ₱' + national.toLocaleString() + '/qtr. This updates ALL seniors.', async () => {
+        try {
+            if (sb) { sb.disabled = true; sb.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Saving...'; }
+            if (st) st.textContent = 'Saving — updating all senior accounts...';
+            await update(ref(db, 'pensionSettings'), { local, national, updatedAt: Date.now(), updatedBy: by });
+            pensionSettingsCache = { local, national };
+            const data = window.lastUsersData || {};
+            const ups = {};
+            Object.entries(data).forEach(([uid, u]) => {
+                if (!u || u.role !== 'senior' || isArchivedSenior(u)) return;
+                ups[`users/${uid}/pensionLocalAmount`] = local;
+                ups[`users/${uid}/pensionNationalAmount`] = national;
+                ups[`users/${uid}/pensionAmount`] = local;
+                ups[`users/${uid}/pensionQuarterlyTotal`] = qtr;
+                ups[`users/${uid}/pensionSetAt`] = Date.now();
+                ups[`users/${uid}/pensionSetBy`] = by;
+            });
+            if (Object.keys(ups).length) await update(ref(db), ups);
+            logPensionAudit('PENSION_SETTINGS_UPDATED', null, 'All seniors', qtr, 'Global pension updated by ' + by);
+            scNotify('success', 'Saved. All pensions now Local ₱' + local.toLocaleString() + '/mo + National ₱' + national.toLocaleString() + '/qtr.');
+            if (st) st.textContent = 'Saved — quarterly total ₱' + qtr.toLocaleString() + '.';
+            refreshPensionSettingsPreview();
+        } catch (err) {
+            scNotify('error', 'Failed to save: ' + err.message);
+            if (st) st.textContent = 'Save failed. Try again.';
+        } finally {
+            if (sb) { sb.disabled = false; sb.innerHTML = '<i class="fas fa-save" style="margin-right:6px;"></i>Save changes'; }
+        }
+    });
+}
+async function ensureVerifiedSeniorsHavePension(usersData) {
+    try {
+        const ups = {};
+        const now = Date.now();
+        const by = (window.currentStaffName || '').trim() || 'OSCA Staff';
+        Object.entries(usersData || {}).forEach(([uid, u]) => {
+            if (!u || u.role !== 'senior' || isArchivedSenior(u)) return;
+            if (!isVerified(u) || hasPension(u)) return;
+            const L = Math.round(Number(pensionSettingsCache.local)) || 1000;
+            const N = Math.round(Number(pensionSettingsCache.national)) || 3000;
+            ups[`users/${uid}/pensionLocalAmount`] = L;
+            ups[`users/${uid}/pensionNationalAmount`] = N;
+            ups[`users/${uid}/pensionAmount`] = L;
+            ups[`users/${uid}/pensionQuarterlyTotal`] = L * 3 + N;
+            ups[`users/${uid}/pensionSetAt`] = now;
+            ups[`users/${uid}/pensionSetBy`] = by;
+        });
+        if (Object.keys(ups).length) await update(ref(db), ups);
+    } catch (e) { console.warn('Auto-grant skipped:', e.message); }
+}
+
 function renderPensionSetup(usersData) {
     const setupContainer = document.getElementById('pensionSetupContainer');
     if (!setupContainer) return;
@@ -2239,14 +2420,14 @@ function renderPensionSetup(usersData) {
     const isVerified = s => s.kycStatus === 'Verified' || !!s.kycVerifiedAt;
 
     const awaiting = seniors
-        .filter(s => isVerified(s) && !s.pensionAmount)
+        .filter(s => isVerified(s) && !hasPension(s))
         // High priority seniors first so their pension setup is seen fastest,
         // then Medium, then Low; ties keep alphabetical order (no guessing).
         .map(s => ({ ...s, _prio: effectiveSeniorPriority(s) }))
         .sort((a, b) => (priorityRank(a._prio) - priorityRank(b._prio))
             || String(a.name || '').localeCompare(String(b.name || '')));
     const configured = seniors
-        .filter(s => s.pensionAmount)
+        .filter(s => hasPension(s))
         .map(s => ({ ...s, _prio: effectiveSeniorPriority(s) }))
         .sort((a, b) => (priorityRank(a._prio) - priorityRank(b._prio))
             || String(a.name || '').localeCompare(String(b.name || '')));
@@ -2259,7 +2440,7 @@ function renderPensionSetup(usersData) {
     if (awaiting.length === 0) {
         setupContainer.innerHTML = `
             <div style="text-align:center; color:#71717a; padding:20px; border:1px dashed #d4d4d8; border-radius:4px;">
-                All approved senior accounts have a monthly pension configured.
+                All verified senior accounts already have Local + National pension.
             </div>`;
     } else {
         setupContainer.innerHTML = `
@@ -2270,7 +2451,7 @@ function renderPensionSetup(usersData) {
                         <th style="padding:8px 10px; font-weight:600;">OSCA ID</th>
                         <th style="padding:8px 10px; font-weight:600;">Priority</th>
                         <th style="padding:8px 10px; font-weight:600;">Age</th>
-                        <th style="padding:8px 10px; font-weight:600; width:170px;">Monthly Amount (PHP)</th>
+                        <th style="padding:8px 10px; font-weight:600;">Pension</th>
                         <th style="padding:8px 10px; font-weight:600; width:130px;"></th>
                     </tr>
                 </thead>
@@ -2281,13 +2462,10 @@ function renderPensionSetup(usersData) {
                         <td style="padding:10px; color:#3f3f46;">${escHtml(s.seniorId || 'N/A')}</td>
                         <td style="padding:10px;">${priorityPillHtml(s._prio)}</td>
                         <td style="padding:10px; color:#3f3f46;">${escHtml(String(s.age ?? 'N/A'))}</td>
+                        <td style="padding:10px; color:#166534; font-weight:600; font-size:0.82rem;">Local ₱${Number(pensionSettingsCache.local).toLocaleString()}/mo<br>National ₱${Number(pensionSettingsCache.national).toLocaleString()}/qtr</td>
                         <td style="padding:10px;">
-                            <input type="number" min="0" step="0.01" placeholder="e.g. 1000" id="pensionAmt_${s.uid}"
-                                style="width:140px; padding:7px 10px; border:1px solid #a1a1aa; border-radius:4px; font-size:0.9rem;" />
-                        </td>
-                        <td style="padding:10px;">
-                            <button style="background:#1e293b; color:#ffffff; border:none; padding:8px 16px; border-radius:4px; font-weight:600; font-size:0.85rem; cursor:pointer;"
-                                data-action="pension-save" data-uid="${s.uid}" data-seniorname="${escHtml(s.name || '')}">Save</button>
+                            <button style="background:#166534; color:#ffffff; border:none; padding:8px 16px; border-radius:4px; font-weight:600; font-size:0.85rem; cursor:pointer;"
+                                data-action="pension-grant" data-uid="${s.uid}" data-seniorname="${escHtml(s.name || '')}">Grant Pension</button>
                         </td>
                     </tr>`).join('')}
                 </tbody>
@@ -2296,7 +2474,7 @@ function renderPensionSetup(usersData) {
 
     if (configuredContainer) {
         if (configured.length === 0) {
-            configuredContainer.innerHTML = `<div style="text-align:center; color:#71717a; padding:14px; border:1px dashed #d4d4d8; border-radius:4px;">No pensions configured yet.</div>`;
+            configuredContainer.innerHTML = `<div style="text-align:center; color:#71717a; padding:14px; border:1px dashed #d4d4d8; border-radius:4px;">No pensions configured yet. Verified seniors appear here once granted.</div>`;
         } else {
             configuredContainer.innerHTML = `
                 <table style="width:100%; border-collapse:collapse; font-size:0.9rem;">
@@ -2305,79 +2483,95 @@ function renderPensionSetup(usersData) {
                             <th style="padding:8px 10px; font-weight:600;">Senior Name</th>
                             <th style="padding:8px 10px; font-weight:600;">OSCA ID</th>
                             <th style="padding:8px 10px; font-weight:600;">Priority</th>
-                            <th style="padding:8px 10px; font-weight:600;">Monthly Amount</th>
+                            <th style="padding:8px 10px; font-weight:600;">Local (Monthly)</th>
+                            <th style="padding:8px 10px; font-weight:600;">National (Quarterly)</th>
+                            <th style="padding:8px 10px; font-weight:600;">Quarterly Total</th>
                             <th style="padding:8px 10px; font-weight:600;">Set On</th>
                             <th style="padding:8px 10px; font-weight:600;">Set By</th>
                             <th style="padding:8px 10px; font-weight:600; width:90px;"></th>
                         </tr>
                     </thead>
                     <tbody>
-                    ${configured.map(s => `
+                    ${configured.map(s => { const _l = getLocalPensionOf(s); const _n = getNationalPensionOf(s); const _q = _l * 3 + _n; return `
                         <tr style="border-bottom:1px solid #e4e4e7; ${s._prio === 'High' ? 'background:#fef2f2;' : ''}">
                             <td style="padding:10px; font-weight:600; color:#1e293b;">${escHtml(s.name || 'Senior Citizen')}</td>
                             <td style="padding:10px; color:#3f3f46;">${escHtml(s.seniorId || 'N/A')}</td>
                             <td style="padding:10px;">${priorityPillHtml(s._prio)}</td>
-                            <td id="pensionAmtCell_${s.uid}" style="padding:10px; font-weight:700; color:#166534;">PHP ${Number(s.pensionAmount).toLocaleString()}</td>
+                            <td style="padding:10px; font-weight:700; color:#166534;">₱${Number(_l).toLocaleString()}</td>
+                            <td style="padding:10px; font-weight:700; color:#1d4ed8;">₱${Number(_n).toLocaleString()}</td>
+                            <td style="padding:10px; font-weight:800; color:#1e293b;">₱${Number(_q).toLocaleString()}</td>
                             <td style="padding:10px; color:#3f3f46;">${s.pensionSetAt ? new Date(Number(s.pensionSetAt)).toLocaleDateString() : '—'}</td>
                             <td style="padding:10px; color:#3f3f46;">${s.pensionSetBy ? escHtml(s.pensionSetBy) : '—'}</td>
-                            <td id="pensionActionsCell_${s.uid}" style="padding:10px; white-space:nowrap;">
-                                <button style="background:#1e293b; color:#ffffff; border:none; padding:6px 12px; border-radius:4px; font-weight:600; font-size:0.82rem; cursor:pointer; margin-right:6px;"
-                                    data-action="pension-edit" data-uid="${s.uid}" data-amount="${Number(s.pensionAmount) || 0}" data-seniorname="${escHtml(s.name || '')}" title="Change the monthly pension amount">Change Amount</button>
+                            <td style="padding:10px; white-space:nowrap;">
                                 <button style="background:#ffffff; color:#b91c1c; border:1px solid #b91c1c; padding:6px 12px; border-radius:4px; font-weight:600; font-size:0.82rem; cursor:pointer;"
                                     data-action="pension-remove" data-uid="${s.uid}" data-seniorname="${escHtml(s.name || '')}" title="Remove pension setup">Remove</button>
                             </td>
-                        </tr>`).join('')}
+                        </tr>`; }).join('')}
                     </tbody>
                 </table>`;
         }
     }
 
-    // Save pension handlers
-    document.querySelectorAll('[data-action="pension-save"]').forEach(btn => {
+    // Grant pension (pending -> grant both Local + National at current global amounts)
+    document.querySelectorAll('[data-action="pension-grant"]').forEach(btn => {
         btn.onclick = async () => {
             const uid = btn.dataset.uid;
-            const seniorName = btn.dataset.seniorname;
-            const input = document.getElementById(`pensionAmt_${uid}`);
-            const amount = Number(input && input.value);
-            if (!amount || amount <= 0) {
-                scNotify('error', 'Enter a valid pension amount (greater than 0).');
-                return;
-            }
+            const seniorName = btn.dataset.seniorname || 'senior';
+            const local = Math.round(Number(pensionSettingsCache.local)) || DEFAULT_LOCAL_PENSION;
+            const national = Math.round(Number(pensionSettingsCache.national)) || DEFAULT_NATIONAL_PENSION;
+            const qtr = local * 3 + national;
             const actorName = (window.currentStaffName || '').trim() || 'OSCA Staff';
-            confirmAction(`Set the automatic monthly pension of ${seniorName} to PHP ${amount.toLocaleString()}?`, async () => {
+            confirmAction(`Grant pension to ${seniorName}? Local ₱${local.toLocaleString()}/month + National ₱${national.toLocaleString()}/quarter.`, async () => {
                 try {
+                    // Deceased gate: an archived Deceased senior must never be
+                    // granted pension again (re-check the live record in case it
+                    // was archived after the board rendered).
+                    let seniorNow = null;
+                    try {
+                        const seniorSnap = await get(ref(db, 'users/' + uid));
+                        if (seniorSnap.exists()) seniorNow = seniorSnap.val() || null;
+                    } catch (gateErr) { /* fall through to server-side rules */ }
+                    if (seniorNow && (String(seniorNow.lifeStatus || '') === 'Deceased' || String(seniorNow.status || '') === 'Deceased')) {
+                        scNotify('error', 'This senior have passed away, please go to OSCA if you think this is an error');
+                        return;
+                    }
                     await update(ref(db, `users/${uid}`), {
-                        pensionAmount: amount,
+                        pensionLocalAmount: local,
+                        pensionNationalAmount: national,
+                        pensionAmount: local,
+                        pensionQuarterlyTotal: qtr,
                         pensionSetAt: Date.now(),
                         pensionSetBy: actorName
                     });
-                    logPensionAudit('PENSION_SET', uid, seniorName, amount,
-                        `Set monthly pension of ${seniorName} to PHP ${amount.toLocaleString()}`);
-                    scNotify('success', `Monthly pension of PHP ${amount.toLocaleString()} set for ${seniorName}.`);
-                    // Notify the senior in-app + official e-mail (best-effort)
-                    sendSeniorPensionStatus(seniors, uid, seniorName, amount, 'pension_approved');
+                    logPensionAudit('PENSION_SET', uid, seniorName, qtr,
+                        `Granted pension to ${seniorName}: Local ₱${local.toLocaleString()}/mo + National ₱${national.toLocaleString()}/qtr`);
+                    scNotify('success', `Pension granted to ${seniorName} (quarterly total ₱${qtr.toLocaleString()}).`);
+                    sendSeniorPensionStatus(seniors, uid, seniorName, { localAmount: local, nationalAmount: national, quarterlyTotal: qtr }, 'pension_approved');
                 } catch (err) {
-                    console.error('Pension setup error:', err);
-                    scNotify('error', 'Failed to save pension: ' + err.message);
+                    console.error('Pension grant error:', err);
+                    scNotify('error', 'Failed to grant pension: ' + err.message);
                 }
             });
         };
     });
 
-    // Remove pension handlers
+    // Remove pension handlers (clears Local + National + legacy fields)
     document.querySelectorAll('[data-action="pension-remove"]').forEach(btn => {
         btn.onclick = () => {
             const uid = btn.dataset.uid;
             const seniorName = btn.dataset.seniorname;
-            confirmAction(`Remove the monthly pension setup for ${seniorName}? They will move back to "Pending Account".`, async () => {
+            confirmAction(`Remove the pension setup for ${seniorName}? They will move back to "Pending Account".`, async () => {
                 try {
                     await update(ref(db, `users/${uid}`), {
+                        pensionLocalAmount: null,
+                        pensionNationalAmount: null,
                         pensionAmount: null,
+                        pensionQuarterlyTotal: null,
                         pensionSetAt: null,
                         pensionSetBy: null
                     });
                     logPensionAudit('PENSION_REMOVED', uid, seniorName, 0,
-                        `Removed monthly pension setup for ${seniorName}`);
+                        `Removed pension setup for ${seniorName}`);
                     scNotify('success', `Pension setup removed for ${seniorName}.`);
                     // Notify the senior in-app + official e-mail (best-effort)
                     sendSeniorPensionStatus(seniors, uid, seniorName, 0, 'pension_declined');
@@ -2389,59 +2583,8 @@ function renderPensionSetup(usersData) {
         };
     });
 
-    // Change Amount (edit) handlers — inline edit of the configured monthly pension
-    document.querySelectorAll('[data-action="pension-edit"]').forEach(btn => {
-        btn.onclick = () => {
-            const uid = btn.dataset.uid;
-            const amountCell = document.getElementById(`pensionAmtCell_${uid}`);
-            const actionsCell = document.getElementById(`pensionActionsCell_${uid}`);
-            if (!amountCell || !actionsCell || amountCell.querySelector('input')) return;
-            const current = Number(btn.dataset.amount) || 0;
-            amountCell.innerHTML = `<input type="number" min="0" step="0.01" value="${current}" id="pensionEdit_${uid}"
-                style="width:130px; padding:7px 10px; border:1px solid #a1a1aa; border-radius:4px; font-size:0.9rem;" />`;
-            actionsCell.innerHTML = `
-                <button data-action="pension-edit-save" data-uid="${uid}" data-seniorname="${btn.dataset.seniorname}"
-                    style="background:#1e293b; color:#ffffff; border:none; padding:6px 12px; border-radius:4px; font-weight:600; font-size:0.82rem; cursor:pointer; margin-right:6px;">Save</button>
-                <button data-action="pension-edit-cancel"
-                    style="background:#ffffff; color:#52525b; border:1px solid #a1a1aa; padding:6px 12px; border-radius:4px; font-weight:600; font-size:0.82rem; cursor:pointer;">Cancel</button>`;
-
-            const saveBtn = actionsCell.querySelector('[data-action="pension-edit-save"]');
-            const cancelBtn = actionsCell.querySelector('[data-action="pension-edit-cancel"]');
-
-            saveBtn.onclick = () => {
-                const input = document.getElementById(`pensionEdit_${uid}`);
-                const amount = Number(input && input.value);
-                const seniorName = saveBtn.dataset.seniorname || 'senior';
-                if (!amount || amount <= 0) {
-                    scNotify('error', 'Enter a valid pension amount (greater than 0).');
-                    return;
-                }
-                const actorName = (window.currentStaffName || '').trim() || 'OSCA Staff';
-                confirmAction(`Change the monthly pension of ${seniorName} to PHP ${amount.toLocaleString()}?`, async () => {
-                    try {
-                        await update(ref(db, `users/${uid}`), {
-                            pensionAmount: amount,
-                            pensionSetAt: Date.now(),
-                            pensionSetBy: actorName
-                        });
-                        logPensionAudit('PENSION_UPDATED', uid, seniorName, amount,
-                            `Changed monthly pension of ${seniorName} to PHP ${amount.toLocaleString()}`);
-                        scNotify('success', `Monthly pension of ${seniorName} changed to PHP ${amount.toLocaleString()}.`);
-                        // Notify the senior in-app + official e-mail (best-effort)
-                        sendSeniorPensionStatus(seniors, uid, seniorName, amount, 'pension_approved');
-                    } catch (err) {
-                        console.error('Pension edit error:', err);
-                        scNotify('error', 'Failed to change pension: ' + err.message);
-                    }
-                });
-            };
-
-            cancelBtn.onclick = () => {
-                // Restore the last rendered state from the cached users data
-                if (window.lastUsersData) renderPensionSetup(window.lastUsersData);
-            };
-        };
-    });
+    // NOTE: per-senior "Change Amount" removed by design — amounts are global.
+    // Employees change Local / National once at the top; Save applies to ALL.
 }
 
 // ── Claims Renderer (Real System Look) ─────────────────────────────────────────
@@ -2505,9 +2648,16 @@ function renderClaimsDashboard(claimsData) {
         return (a.createdAt || 0) - (b.createdAt || 0);
     };
     const _entries = Object.entries(claimsData || {});
-    const _pendingEntries = _entries.filter(([, c]) => c && c.status === 'Pending').sort(_claimPrioSort);
+    // Deceased accounts stop receiving pension — never list their claims in the
+    // processing queues (burial help for a deceased senior's family is filed by
+    // relatives, not on the archived senior account itself).
+    const _isDeceasedClaimSenior = (c) => {
+        const s = _seniorOfClaim(c);
+        return !!s && (String(s.lifeStatus || '') === 'Deceased' || String(s.status || '') === 'Deceased');
+    };
+    const _pendingEntries = _entries.filter(([, c]) => c && c.status === 'Pending' && !_isDeceasedClaimSenior(c)).sort(_claimPrioSort);
     // Not Claimed Yet: approved by staff, waiting for payout / release
-    const _notClaimedEntries = _entries.filter(([, c]) => c && ['Approved_Pending_Payout', 'Approved'].includes(c.status)).sort(_claimPrioSort);
+    const _notClaimedEntries = _entries.filter(([, c]) => c && ['Approved_Pending_Payout', 'Approved'].includes(c.status) && !_isDeceasedClaimSenior(c)).sort(_claimPrioSort);
     // Claimed: released to the senior (marked claimed / paid)
     const _claimedEntries = _entries.filter(([, c]) => c && ['Claimed', 'Paid'].includes(c.status)).sort(_claimPrioSort);
     // History of Claim: every claim that reached a final state (Claimed / Paid / Rejected)
@@ -2707,6 +2857,20 @@ function renderClaimsDashboard(claimsData) {
                 targetBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Processing...';
 
                 try {
+                    // Deceased gate: a senior archived as Deceased must never
+                    // receive a payout, even if the claim was approved earlier.
+                    let seniorNow = null;
+                    try {
+                        const seniorSnap = await get(ref(db, 'users/' + uid));
+                        if (seniorSnap.exists()) seniorNow = seniorSnap.val() || null;
+                    } catch (gateErr) { /* fall through to server / write rules */ }
+                    if (seniorNow && (String(seniorNow.lifeStatus || '') === 'Deceased' || String(seniorNow.status || '') === 'Deceased')) {
+                        targetBtn.disabled = false;
+                        targetBtn.style.cursor = 'pointer';
+                        targetBtn.innerHTML = 'Mark as Claimed';
+                        scNotify('error', 'This senior have passed away, please go to OSCA if you think this is an error');
+                        return;
+                    }
                     // Use the SAME reference number the senior already received in
                     // their approval notification — never generate a new one here.
                     // (Generated fresh ONLY for legacy claims approved before refs existed.)
@@ -2756,6 +2920,25 @@ function renderClaimsDashboard(claimsData) {
                             headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + emailToken },
                             body: JSON.stringify({ email: userData.email, name: seniorName, amount: amount, type: 'claim_approved', refNumber: refNum, serviceType: serviceType })
                         }).catch(console.error);
+                    }
+
+                    // 6. Official release SMS (TextBee). The server reads the CP
+                    //    number from the senior's profile — best-effort, so a
+                    //    sleeping gateway never blocks the "Claimed" update.
+                    if (auth.currentUser) {
+                        auth.currentUser.getIdToken().then(smsToken => {
+                            return fetch('/api/send-status-sms', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + smsToken },
+                                body: JSON.stringify({
+                                    uid,
+                                    type: /pension/i.test(String(serviceType || '')) ? 'pension_released' : 'claim_released',
+                                    amount: String(amount || ''),
+                                    serviceType: serviceType,
+                                    refNumber: refNum
+                                })
+                            });
+                        }).catch(err => console.warn('Release SMS skipped:', err.message));
                     }
 
                     scNotify('success', `Assistance for ${seniorName} marked as CLAIMED! Senior dashboard updated.`);
@@ -2914,6 +3097,19 @@ function openClaimDetailsModal(claimId, claim) {
     // Approve button click handler
     approveBtn.onclick = async () => {
         try {
+            // Deceased gate: never release a pension/benefit payout to an account
+            // OSCA staff archived as Deceased (burial claims for the family are
+            // filed by relatives, not approved on the deceased senior's account).
+            const seniorUidPre = claim.uid;
+            let seniorPre = null;
+            try {
+                const preSnap = await get(ref(db, 'users/' + seniorUidPre));
+                if (preSnap.exists()) seniorPre = preSnap.val() || null;
+            } catch (preErr) { /* fall through to server / write-rule enforcement */ }
+            if (seniorPre && (String(seniorPre.lifeStatus || '') === 'Deceased' || String(seniorPre.status || '') === 'Deceased')) {
+                scNotify('error', 'This senior have passed away, please go to OSCA if you think this is an error');
+                return;
+            }
             const now = Date.now();
             const refNum = generateReferenceNumber('CLM');
             const seniorUid = claim.uid;
@@ -2963,8 +3159,28 @@ function openClaimDetailsModal(claimId, claim) {
                 }
             } catch (emailErr) { console.error('Claim approval e-mail error:', emailErr); }
 
+            // Official "releasing" SMS (TextBee): the claim is approved and the
+            // payout is being prepared. Best-effort — the approval is already
+            // saved, so a sleeping gateway can never fail this modal action.
+            try {
+                if (auth.currentUser) {
+                    const smsToken = await auth.currentUser.getIdToken();
+                    fetch('/api/send-status-sms', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + smsToken },
+                        body: JSON.stringify({
+                            uid: seniorUid,
+                            type: /pension/i.test(String(serviceType || '')) ? 'pension_releasing' : 'claim_releasing',
+                            amount: String(claim.paidAmount || claim.amount || ''),
+                            serviceType: serviceType,
+                            refNumber: refNum
+                        })
+                    }).catch(console.error);
+                }
+            } catch (smsErr) { console.warn('Releasing SMS skipped:', smsErr.message); }
+
             modal.style.display = 'none';
-            scNotify('success', 'Claim Approved! Senior notified in-app & by e-mail.');
+            scNotify('success', 'Claim Approved! Senior notified in-app, by e-mail & SMS.');
 
         } catch (e) {
             scNotify('error', 'Approval failed: ' + e.message);
@@ -3002,8 +3218,27 @@ function openClaimDetailsModal(claimId, claim) {
                 }).catch(console.error);
             }
 
+            // Decline SMS (TextBee) — the CP number is read from the senior's
+            // profile on the server. Best-effort: the rejection is already saved.
+            try {
+                if (auth.currentUser) {
+                    const smsToken = await auth.currentUser.getIdToken();
+                    fetch('/api/send-status-sms', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + smsToken },
+                        body: JSON.stringify({
+                            uid: seniorUid,
+                            type: 'claim_declined',
+                            serviceType: claim.serviceType,
+                            refNumber: refNum,
+                            reason: 'Please visit the OSCA Magalang office with your documents.'
+                        })
+                    }).catch(console.error);
+                }
+            } catch (smsErr) { console.warn('Decline SMS skipped:', smsErr.message); }
+
             modal.style.display = 'none';
-            scNotify('warning', `Claim Declined. Senior notified. Ref: ${refNum}`);
+            scNotify('warning', `Claim Declined. Senior notified in-app, by e-mail & SMS. Ref: ${refNum}`);
         } catch (e) {
             scNotify('error', 'Decline failed: ' + e.message);
         }
@@ -3071,16 +3306,36 @@ function attachButtonListeners() {
                     kycVerifiedAt: now,
                     verifiedBy: employeeName,
                     verifiedByUid: employeeUid,
-                    verifiedByEmail: employeeEmail
+                    verifiedByEmail: employeeEmail,
+                    pensionLocalAmount: Math.round(Number(pensionSettingsCache.local)) || 1000,
+                    pensionNationalAmount: Math.round(Number(pensionSettingsCache.national)) || 3000,
+                    pensionAmount: Math.round(Number(pensionSettingsCache.local)) || 1000,
+                    pensionQuarterlyTotal: (Math.round(Number(pensionSettingsCache.local)) || 1000) * 3 + (Math.round(Number(pensionSettingsCache.national)) || 3000),
+                    pensionSetAt: now,
+                    pensionSetBy: employeeName
                 });
                 await update(ref(db, `users/${uid}/notifications/${notifKey}`), {
                     title: 'Identity Verified ✓',
-                    description: 'Congratulations! Your identity has been verified. You can now apply for pensions, benefits, and welfare assistance.',
+                    description: 'Congratulations! Your identity has been verified. Your Local (monthly) + National (quarterly) pension is now active — check your dashboard.',
                     createdAt: now
                 });
 
                 if (card) card.style.display = 'none';
                 scNotify('success', 'Senior identity verified successfully!');
+
+                // Official SMS (TextBee): the account is now verified. The server
+                // reads the CP number from this senior's profile. Best-effort — the
+                // verification is already saved, so a sleeping gateway must never
+                // surface an error to the staff member.
+                if (auth.currentUser) {
+                    auth.currentUser.getIdToken().then(token => {
+                        return fetch('/api/send-status-sms', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+                            body: JSON.stringify({ uid, type: 'account_verified' })
+                        });
+                    }).catch(err => console.warn('Verification SMS skipped:', err.message));
+                }
 
                 // Mirror the verified senior to the Supabase data store (best-effort)
                 if (auth.currentUser) {
@@ -3836,6 +4091,47 @@ window.renderArchiveList = function() {
     }).join('');
 };
 
+// Prints the official list of ALL deceased senior citizens (Archive tab → Print).
+// Table columns: ID No, Name, Barangay (taken from the senior's profile), Reason.
+window.printDeceasedSeniors = function () {
+    try {
+        const { archived } = getSeniorRecords();
+        const deceased = archived
+            .filter(s => getSeniorStatus(s) === 'Deceased')
+            .sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')));
+
+        if (deceased.length === 0) {
+            scNotify('warning', 'No deceased senior citizen records to print.');
+            return;
+        }
+
+        const w = window.open('', '_blank', 'width=1100,height=750');
+        if (!w) {
+            scNotify('warning', 'Please allow pop-ups to print the deceased seniors list.');
+            return;
+        }
+
+        let html = '<!DOCTYPE html><html><head><meta charset="utf-8"><title>SilverCare — Deceased Senior Citizens</title>';
+        html += '<style>body{font-family:Arial,sans-serif;color:#1e293b;padding:26px;}h1{font-size:19px;margin:0;}p.meta{color:#64748b;font-size:12px;}table{width:100%;border-collapse:collapse;margin-top:14px;font-size:11.5px;}th{background:#1e293b;color:#fff;padding:7px 8px;border:1px solid #1e293b;text-align:left;}td{padding:6px 8px;border:1px solid #cbd5e1;}@media print{tr{page-break-inside:avoid;}}</style>';
+        html += '</head><body>';
+        html += '<h1>SilverCare — OSCA Magalang · Deceased Senior Citizens</h1>';
+        html += `<p class="meta">Generated: ${escHtml(new Date().toLocaleString())} · ${deceased.length} deceased record(s) · Source: Archived Senior Citizen Records</p>`;
+        html += '<table><thead><tr><th>ID No</th><th>Name</th><th>Barangay</th><th>Reason</th></tr></thead><tbody>';
+        deceased.forEach(s => {
+            html += `<tr><td>${escHtml(s.seniorId || s.verificationSeniorId || 'N/A')}</td><td>${escHtml(s.name || 'Unnamed Record')}</td><td>${escHtml(s.barangay || 'N/A')}</td><td>Deceased</td></tr>`;
+        });
+        html += '</tbody></table></body></html>';
+        w.document.write(html);
+        w.document.close();
+        w.focus();
+        setTimeout(() => { try { w.print(); } catch (e) { /* user can print manually */ } }, 350);
+        scNotify('success', `Printing the list of ${deceased.length} deceased senior citizen record(s).`);
+    } catch (err) {
+        console.error('Deceased seniors print error:', err);
+        scNotify('error', 'Print failed. Please try again.');
+    }
+};
+
 // ═══════════════════════════════════════════════════════════════════════════
 // ARCHIVE FUNCTION
 // ─ Records marked Inactive / Deceased / Transferred are moved to the
@@ -3891,7 +4187,12 @@ window.restoreArchivedSenior = function(uid) {
                     lifeStatus: 'Active',
                     status: 'Active',
                     restoredAt: Date.now(),
-                    restoredBy: window.currentStaffName || 'Staff'
+                    restoredBy: window.currentStaffName || 'Staff',
+                    // Clearing the Deceased pension stop (set by Manage Seniors →
+                    // Deceased) keeps the record coherent once it is active again.
+                    pensionSuspended: false,
+                    pensionSuspendedAt: null,
+                    pensionSuspendedReason: null
                 });
                 scNotify('success', `${name} has been restored to ACTIVE.`);
                 syncArchiveMirror(uid);

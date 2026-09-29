@@ -36,8 +36,9 @@ admin.initializeApp({
 //        verificationSeniorId)
 //     - clears activity data: benefits, health (logs), notifications,
 //       medicationRequests
-//     - clears pension setup: pensionAmount/SetAt/SetBy, lastPensionMonth,
-//       lastPensionStatus, priorityLevel
+//     - clears pension setup: pensionLocalAmount, pensionNationalAmount,
+//       pensionQuarterlyTotal, legacy pensionAmount/SetAt/SetBy,
+//       lastPensionMonth, lastPensionStatus, priorityLevel
 //   Global nodes (entries belonging to this senior are deleted):
 //     - claims, queue, appointmentRequests, checkups/{uid}, transactions
 //
@@ -83,6 +84,7 @@ async function resetSeniorAccount() {
     // 3) Clear activity data on the user record
     [
         'benefits', 'health', 'notifications', 'medicationRequests',
+        'pensionLocalAmount', 'pensionNationalAmount', 'pensionQuarterlyTotal',
         'pensionAmount', 'pensionSetAt', 'pensionSetBy',
         'lastPensionMonth', 'lastPensionStatus', 'priorityLevel'
     ].forEach(k => { updates[`users/${uid}/${k}`] = null; });

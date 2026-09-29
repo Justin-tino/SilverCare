@@ -55,6 +55,13 @@ app.get('/api/email-status', (req, res) => {
     res.json(emailStatusPayload());
 });
 
+// --- SMS provider status (no auth, no secrets) ---
+// Same idea for text messages: open /api/sms-status in a browser to see
+// whether the TextBee gateway is armed. The API key is never returned.
+app.get('/api/sms-status', (req, res) => {
+    res.json(smsStatusPayload());
+});
+
 // --- Disable caching for HTML responses to prevent BFCache security issues ---
 app.use((req, res, next) => {
     res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
@@ -283,6 +290,204 @@ function emailStatusPayload() {
     };
 }
 
+// --- SMS delivery (TextBee — the OSCA Android phone becomes the SMS gateway) ---
+// Railway blocks outbound SMTP, but TextBee is a plain HTTPS API (port 443), so
+// it works on every Railway plan. TextBee queues each message to the Android
+// phone paired with TEXTBEE_API_KEY and that phone sends it through its own
+// SIM — no per-message gateway fees. Each senior receives the text on the
+// mobile number saved in their OWN profile (users/{uid}/cpNumber).
+//   TEXTBEE_API_KEY    (required) API key from the TextBee dashboard
+//   TEXTBEE_DEVICE_ID  (optional) pin the sending phone if several are paired
+//   TEXTBEE_BASE_URL   (optional) override for a self-hosted TextBee instance
+// API reference: https://textbee.dev/docs/api-reference
+const SMS_PROVIDER = process.env.TEXTBEE_API_KEY ? 'textbee' : 'disabled';
+console.log(`SMS provider: ${SMS_PROVIDER}`);
+
+const TEXTBEE_BASE_URL = String(process.env.TEXTBEE_BASE_URL || 'https://api.textbee.dev/api/v1')
+    .trim().replace(/\/+$/, '');
+
+// Hard cap so one notice can never turn into a wall of text on a senior's
+// phone (every 160 GSM characters is a separate billed message).
+const SMS_MAX_LENGTH = 480;
+
+// Events a senior can be texted about. Anything outside this list is rejected,
+// so the gateway can never be used as an open SMS relay.
+const SMS_NOTIFICATION_TYPES = [
+    'account_verified',
+    'pension_approved', 'pension_releasing', 'pension_released', 'pension_declined',
+    'claim_approved', 'claim_releasing', 'claim_released', 'claim_declined'
+];
+
+// Mobile numbers are stored exactly as typed ("0917 123 4567",
+// "+63 917 123 4567", "9171234567"). TextBee expects E.164, so normalise to
+// +639XXXXXXXXX. Anything that is not a PH mobile number returns '' and the
+// caller skips the send instead of spending an API call on a broken number.
+function normalizePhMobile(raw) {
+    let digits = String(raw || '').replace(/\D/g, '');
+    if (!digits) return '';
+    if (digits.startsWith('63') && digits.length > 10) digits = digits.slice(2); // 639171234567
+    digits = digits.replace(/^0+/, '');                                          // 09171234567
+    if (!/^9\d{9}$/.test(digits)) return '';                                     // PH mobile = 9XXXXXXXXX
+    return `+63${digits}`;
+}
+
+// Never write a senior's full mobile number into logs or audit entries.
+function maskMobile(raw) {
+    const e164 = normalizePhMobile(raw);
+    if (!e164) return '****' + String(raw || '').replace(/\D/g, '').slice(-3);
+    return `${e164.slice(0, 6)}****${e164.slice(-3)}`;
+}
+
+// Values embedded in an SMS: no control characters (an SMS cannot render
+// them), no newlines, and bounded length so one field cannot flood the text.
+function smsSafe(str, max) {
+    return String(str === null || str === undefined ? '' : str)
+        .replace(/[\u0000-\u001F\u007F]+/g, ' ')
+        .replace(/\s{2,}/g, ' ')
+        .trim()
+        .slice(0, max || 120);
+}
+
+// Unified SMS sender — every route MUST use this, never call TextBee directly.
+async function sendSms({ to, message }) {
+    if (!process.env.TEXTBEE_API_KEY) {
+        throw new Error('SMS is not configured. Ask the administrator to set TEXTBEE_API_KEY.');
+    }
+    const recipient = normalizePhMobile(to);
+    if (!recipient) {
+        throw new Error('No valid PH mobile number on file.');
+    }
+    const text = String(message || '').trim().slice(0, SMS_MAX_LENGTH);
+    if (!text) throw new Error('SMS message is empty.');
+
+    const payload = { recipients: [recipient], message: text };
+    // Pin the sending phone when the OSCA account pairs more than one device.
+    if (process.env.TEXTBEE_DEVICE_ID) payload.deviceId = String(process.env.TEXTBEE_DEVICE_ID).trim();
+
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 20000);
+    try {
+        const resp = await fetch(`${TEXTBEE_BASE_URL}/gateway/send-sms`, {
+            method: 'POST',
+            headers: {
+                'x-api-key': process.env.TEXTBEE_API_KEY,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(payload),
+            signal: ctrl.signal
+        });
+        const data = await resp.json().catch(() => ({}));
+        if (!resp.ok || data.success === false) {
+            throw new Error((data && (data.error || data.message)) || `TextBee API error (HTTP ${resp.status})`);
+        }
+        if (data.data && data.data.success === false) {
+            throw new Error(data.data.message || 'TextBee rejected the message.');
+        }
+        return data;
+    } catch (e) {
+        if (e && e.name === 'AbortError') throw new Error('SMS gateway timed out (20s). Please try again.');
+        throw e;
+    } finally {
+        clearTimeout(t);
+    }
+}
+
+// Public (unauthenticated) status endpoint — reports WHICH SMS provider is
+// active and whether its key is present. No secrets are ever returned.
+function smsStatusPayload() {
+    return {
+        ok: true,
+        provider: SMS_PROVIDER,
+        textbeeConfigured: Boolean(process.env.TEXTBEE_API_KEY),
+        devicePinned: Boolean(process.env.TEXTBEE_DEVICE_ID),
+        baseUrl: TEXTBEE_BASE_URL,
+        enabledTypes: SMS_NOTIFICATION_TYPES
+    };
+}
+
+// Short, GSM-7 friendly notice per event. Plain "PHP" instead of "₱" and no
+// emoji on purpose: those symbols force UCS-2 encoding, which halves the
+// characters that fit in one SMS segment.
+function buildStatusSms({ type, name, amount, localAmount, nationalAmount, quarterlyTotal, refNumber, serviceType, reason, period }) {
+    const who = smsSafe(name, 40) || 'Senior Citizen';
+    const peso = v => Number(String(v === null || v === undefined ? '' : v).replace(/[^\d.]/g, '')) || 0;
+    const php = v => `PHP ${peso(v).toLocaleString()}`;
+    const whenPeriod = period ? ` for ${smsSafe(period, 20)}` : '';
+    const repo = refNumber ? ` Ref: ${smsSafe(refNumber, 24)}.` : '';
+    const svc = smsSafe(serviceType, 40).toUpperCase();
+    const tail = ' -OSCA Magalang';
+
+    switch (type) {
+        case 'account_verified':
+            return `SilverCare OSCA: Hello ${who}, your senior account is now VERIFIED. You may log in to the SilverCare portal to view your pension and benefits. Keep your OSCA ID ready.${tail}`;
+
+        case 'pension_approved':
+            return `SilverCare OSCA: Good news ${who}! Your pension is APPROVED - Local ${php(localAmount || amount)} per month + National ${php(nationalAmount)} per quarter, quarterly total ${php(quarterlyTotal || amount)}. Bring your OSCA ID when claiming.${tail}`;
+
+        case 'pension_releasing':
+            return `SilverCare OSCA: ${who}, your pension payout of ${php(amount)} is now being RELEASED${whenPeriod}. Wait for our release confirmation before going to the OSCA office.${repo}${tail}`;
+
+        case 'pension_released':
+            return `SilverCare OSCA: ${who}, your pension payout of ${php(amount)} has been RELEASED${whenPeriod}. Present your OSCA ID or QR Digital ID at the OSCA Magalang office to claim.${repo}${tail}`;
+
+        case 'pension_declined':
+            return `SilverCare OSCA: ${who}, your pension ${smsSafe(reason, 120) || 'payout was not approved'}. Please visit the OSCA Magalang office with your OSCA ID for assistance.${tail}`;
+
+        case 'claim_approved':
+        case 'claim_releasing':
+            return `SilverCare OSCA: ${who}, your ${svc || 'ASSISTANCE'} request of ${php(amount)} is APPROVED and now being RELEASED. Bring your OSCA ID and claim reference when you go to the OSCA Magalang office.${repo}${tail}`;
+
+        case 'claim_released':
+            return `SilverCare OSCA: ${who}, your ${svc || 'ASSISTANCE'} of ${php(amount)} has been RELEASED. Present your OSCA ID or QR Digital ID at the OSCA Magalang office to claim.${repo}${tail}`;
+
+        case 'claim_declined':
+            return `SilverCare OSCA: ${who}, your ${svc || 'ASSISTANCE'} request was DECLINED. ${smsSafe(reason, 110) || 'Please visit the OSCA Magalang office with your documents.'}${repo}${tail}`;
+
+        default:
+            return `SilverCare OSCA: ${who}, there is an update on your SilverCare account. Please open your portal or visit the OSCA Magalang office.${tail}`;
+    }
+}
+
+// Best-effort SMS to a senior. The mobile number is ALWAYS read from the
+// senior's own profile (users/{uid}/cpNumber) — a caller can never aim a text
+// at an arbitrary number through the OSCA gateway. This function never throws:
+// a sleeping Android phone must not roll back a pension approval or a payout
+// that is already saved — it only records the skip in the audit trail.
+async function notifySeniorSms(uid, type, extra) {
+    const systemActor = { uid: 'system', role: 'system', name: 'System' };
+    try {
+        if (!SMS_NOTIFICATION_TYPES.includes(type)) {
+            return { sent: false, reason: 'Unknown SMS notification type.' };
+        }
+        const snap = await admin.database().ref(`users/${uid}`).once('value');
+        if (!snap.exists()) return { sent: false, reason: 'Senior record not found.' };
+        const user = snap.val() || {};
+        const phone = String(user.cpNumber || '').trim();
+
+        if (!phone) {
+            await writeAuditLog('SMS_SKIPPED_NO_NUMBER', systemActor, uid, null,
+                `No mobile number on file — "${type}" SMS not sent to ${user.name || uid}.`);
+            return { sent: false, reason: 'This senior has no mobile (CP) number on file.' };
+        }
+        if (!normalizePhMobile(phone)) {
+            await writeAuditLog('SMS_SKIPPED_INVALID_NUMBER', systemActor, uid, null,
+                `Unusable mobile number on file for ${user.name || uid} — "${type}" SMS not sent.`);
+            return { sent: false, reason: 'The CP number on file is not a valid PH mobile number.' };
+        }
+
+        const message = buildStatusSms({ type, name: user.name, ...(extra || {}) });
+        await sendSms({ to: phone, message });
+        await writeAuditLog('SMS_STATUS_SENT', systemActor, uid, null,
+            `"${type}" SMS sent to ${user.name || uid} (${maskMobile(phone)}).`);
+        return { sent: true, to: maskMobile(phone), type, message };
+    } catch (e) {
+        console.error('Senior SMS notification failed:', e.message);
+        await writeAuditLog('SMS_STATUS_FAILED', systemActor, uid, null,
+            `"${type}" SMS failed for ${uid}: ${e.message}`);
+        return { sent: false, reason: e.message };
+    }
+}
+
 // --- Security: Auth Middleware ---
 async function requireAuth(req, res, next) {
     const authHeader = req.headers.authorization;
@@ -486,6 +691,9 @@ app.post('/api/send-status-email', requireAuth, requireRole('admin', 'employee')
     // Sanitize all user-supplied values to prevent HTML injection in emails
     const name = sanitizeHtml(req.body.name);
     const amount = sanitizeHtml(req.body.amount);
+    const localAmount = sanitizeHtml(req.body.localAmount);
+    const nationalAmount = sanitizeHtml(req.body.nationalAmount);
+    const quarterlyTotal = sanitizeHtml(req.body.quarterlyTotal);
     const refNumber = sanitizeHtml(req.body.refNumber);
     const reason = sanitizeHtml(req.body.reason);
     const serviceType = sanitizeHtml(req.body.serviceType);
@@ -500,28 +708,30 @@ app.post('/api/send-status-email', requireAuth, requireRole('admin', 'employee')
 
     if (type === 'pension_approved') {
         title = 'Pension Payout Approved';
-        subtitle = 'Official Monthly Pension Disbursement Notice';
+        subtitle = 'Official Local + National Pension Disbursement Notice';
         statusTitle = 'Payout Status: Approved & Active';
-        statusText = `We are pleased to inform you that your monthly pension has been officially approved and activated by the OSCA administration. Your monthly pension of PHP ${amount || '1,500'} will be processed and released according to the official OSCA release schedule.`;
+        statusText = `Your dual pension setup has been officially approved and activated by the OSCA administration. Local pension: PHP ${localAmount || '1,000'} per month. National pension: PHP ${nationalAmount || '3,000'} per quarter. Your quarterly pension total is PHP ${quarterlyTotal || amount || '6,000'}.`;
         sectionHtml = `
             <div style="background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 12px; padding: 20px; text-align: center; margin: 25px 0;">
-                <p style="color: #166534; font-size: 0.9rem; margin: 0 0 5px 0; font-weight: 600;">Approved Monthly Pension</p>
-                <span style="font-size: 2.2rem; font-weight: 800; color: #15803d; letter-spacing: -1px;">PHP ${amount || '1,500'}</span>
+                <p style="color: #166534; font-size: 0.9rem; margin: 0 0 8px 0; font-weight: 600;">Approved Dual Pension Setup</p>
+                <p style="font-size: 1.05rem; color: #166534; margin: 4px 0; font-weight: 700;">Local: PHP ${localAmount || '1,000'} / month</p>
+                <p style="font-size: 1.05rem; color: #1d4ed8; margin: 4px 0; font-weight: 700;">National: PHP ${nationalAmount || '3,000'} / quarter</p>
+                <p style="font-size: 1.35rem; color: #15803d; margin: 10px 0 0; font-weight: 800;">Quarterly total: PHP ${quarterlyTotal || amount || '6,000'}</p>
             </div>
             <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 25px; margin-top: 20px;">
                 <h3 style="color: #0f172a; margin-top: 0; font-size: 1.05rem;">What Happens Next:</h3>
                 <ul style="color: #475569; padding-left: 20px; font-size: 0.95rem; line-height: 1.6; margin-bottom: 0;">
-                    <li>Your monthly pension is now <strong>active</strong> under the OSCA Magalang pension program.</li>
-                    <li>Each monthly payout will be announced through your SilverCare portal notifications and e-mail.</li>
+                    <li>Your Local pension is released monthly and your National pension is released every three months.</li>
+                    <li>Each pension payout will be announced through your SilverCare portal notifications and e-mail.</li>
                     <li>To receive a payout, present your physical <strong>OSCA Identification Card</strong> at the designated OSCA Magalang Distribution Center.</li>
                     <li>For questions about the release schedule, please visit or contact the OSCA Magalang office.</li>
                 </ul>
             </div>`;
     } else if (type === 'pension_declined') {
         title = 'Pension Payout Declined';
-        subtitle = 'Monthly Pension Status Update';
+        subtitle = 'Local + National Pension Status Update';
         statusTitle = 'Payout Status: Declined / Suspended';
-        statusText = `We regret to inform you that your monthly pension payout for this period was not approved during our verification process.`;
+        statusText = `We regret to inform you that your Local/National pension payout for this period was not approved during our verification process.`;
         sectionHtml = `
             <div style="background: #fef2f2; border: 1px solid #fecaca; border-radius: 12px; padding: 20px; margin: 25px 0;">
                 <p style="color: #991b1b; font-size: 0.95rem; margin: 0 0 5px 0; font-weight: 700;">Reason for Decline:</p>
@@ -598,6 +808,42 @@ app.post('/api/send-status-email', requireAuth, requireRole('admin', 'employee')
     }
 });
 
+// --- API: Send Unified Status Notification SMS (TextBee) ---
+// Staff-triggered twin of /api/send-status-email. The recipient is resolved
+// from the senior's PROFILE (users/{uid}/cpNumber) and never from the request
+// body, so a staff account can never text an arbitrary number through the
+// OSCA gateway. Best-effort by design: when the senior has no usable number
+// (or the Android gateway is offline) the route answers 200 + skipped:true
+// instead of failing an action the staff member already completed.
+app.post('/api/send-status-sms', requireAuth, requireRole('admin', 'employee'), async (req, res) => {
+    const body = req.body || {};
+    const uid = smsSafe(body.uid, 64);
+    const type = smsSafe(body.type, 40);
+
+    if (!uid) return res.status(400).json({ success: false, message: 'Senior uid is required.' });
+    if (!SMS_NOTIFICATION_TYPES.includes(type)) {
+        return res.status(400).json({ success: false, message: 'Unknown SMS notification type.' });
+    }
+
+    // Only these display-safe values may end up inside the text message.
+    const extra = {
+        amount: smsSafe(body.amount, 20),
+        localAmount: smsSafe(body.localAmount, 20),
+        nationalAmount: smsSafe(body.nationalAmount, 20),
+        quarterlyTotal: smsSafe(body.quarterlyTotal, 20),
+        refNumber: smsSafe(body.refNumber, 24),
+        serviceType: smsSafe(body.serviceType, 40),
+        reason: smsSafe(body.reason, 120),
+        period: smsSafe(body.period, 20)
+    };
+
+    const result = await notifySeniorSms(uid, type, extra);
+    if (result.sent) {
+        return res.json({ success: true, message: 'Status SMS sent to the senior.', to: result.to, type: type });
+    }
+    res.json({ success: true, skipped: true, message: result.reason || 'SMS not sent.', type: type });
+});
+
 // ============================================================
 // Two-Factor Authentication (2FA) for Admin & OSCA Staff ONLY.
 // Kind of 2FA used: E-mail One-Time PIN (6-digit, single-use,
@@ -609,6 +855,14 @@ const twoFAStore = new Map(); // uid -> { code, expiresAt, attempts, lastSentAt 
 const TWOFA_TTL_MS = 5 * 60 * 1000;
 const TWOFA_RESEND_MS = 30 * 1000;
 const TWOFA_MAX_ATTEMPTS = 5;
+const OTP_EXEMPT_EMAILS = new Set([
+    'admin@silvercare.com',
+    'employee@silvercare.com'
+]);
+
+function isOtpExemptEmail(email) {
+    return OTP_EXEMPT_EMAILS.has(String(email || '').trim().toLowerCase());
+}
 
 function twoFAEmailTemplate(pin) {
     return `
@@ -636,8 +890,8 @@ app.post('/api/2fa/start', requireAuth, requireRole('admin', 'employee'), async 
     try {
         const actor = req.authUser;
 
-        // The default/Master Admin account is exempt from e-mail OTP
-        if (String(actor.email || '').toLowerCase() === 'admin@silvercare.com') {
+        // Explicitly provisioned master/default staff accounts are exempt from e-mail OTP.
+        if (isOtpExemptEmail(actor.email)) {
             return res.json({ success: true, message: 'Two-factor authentication is not required for this account.' });
         }
 
@@ -676,9 +930,9 @@ app.post('/api/2fa/start', requireAuth, requireRole('admin', 'employee'), async 
 app.post('/api/2fa/verify', requireAuth, requireRole('admin', 'employee'), (req, res) => {
     const actor = req.authUser;
 
-    // The default/Master Admin account is exempt from e-mail OTP
-    if (String(actor.email || '').toLowerCase() === 'admin@silvercare.com') {
-        writeAuditLog('LOGIN_2FA_SUCCESS', actor, actor.uid, null, 'Master admin sign-in (2FA-exempt)');
+    // Explicitly provisioned master/default staff accounts are exempt from e-mail OTP.
+    if (isOtpExemptEmail(actor.email)) {
+        writeAuditLog('LOGIN_2FA_SUCCESS', actor, actor.uid, null, 'Provisioned staff sign-in (2FA-exempt)');
         return res.json({ success: true, message: 'Two-factor authentication verified.' });
     }
 
@@ -791,7 +1045,10 @@ async function checkReactivationEligibility(u, uid) {
     if (u.role !== 'senior') {
         return { ok: false, code: 400, message: 'Face-scan reactivation is available for senior citizen accounts only.' };
     }
-    if (['Deceased', 'Transferred', 'Archived'].includes(life)) {
+    if (life === 'Deceased' || status === 'Deceased') {
+        return { ok: false, code: 400, message: 'This senior have passed away, please go to OSCA if you think this is an error', reason: 'DECEASED' };
+    }
+    if (['Transferred', 'Archived'].includes(life)) {
         return { ok: false, code: 400, message: 'This record is archived and cannot be reactivated online. Please visit the OSCA office.' };
     }
     if (status === 'Pending') {
@@ -889,6 +1146,10 @@ app.post('/api/reactivation/submit', async (req, res) => {
         const userSnap = await admin.database().ref(`users/${c.uid}`).once('value');
         if (!userSnap.exists()) return res.status(404).json({ success: false, message: 'Account record not found.' });
         const u = userSnap.val() || {};
+        if (String(u.lifeStatus || '') === 'Deceased' || String(u.status || '') === 'Deceased') {
+            reactivationChallenges.delete(token);
+            return res.status(400).json({ success: false, message: 'This senior have passed away, please go to OSCA if you think this is an error', reason: 'DECEASED' });
+        }
         if ((u.status || '') === 'Active' && (!u.lifeStatus || u.lifeStatus === 'Active')) {
             reactivationChallenges.delete(token);
             return res.status(400).json({ success: false, message: 'This account is still active, please proceed to login', reason: 'ALREADY_ACTIVE' });
@@ -952,8 +1213,9 @@ app.post('/api/reactivation/requests/:uid/review', requireAuth, requireRole('adm
             if (!userSnap.exists()) return res.status(404).json({ success: false, message: 'Senior record not found.' });
             const u = userSnap.val() || {};
             if (['Deceased', 'Transferred', 'Archived'].includes(u.lifeStatus || '')) {
+                const isDec = String(u.lifeStatus || '') === 'Deceased' || String(u.status || '') === 'Deceased';
                 await admin.database().ref(`reactivationRequests/${targetUid}`).update({ status: 'Rejected', reviewedBy: actor.name || actor.email, reviewedAt: Date.now(), reviewNote: ((note || '') + ' [Auto-note: record is archived; office visit required.]').slice(0, 500) });
-                return res.status(400).json({ success: false, message: 'Cannot reactivate — this record is archived. The senior must visit the OSCA office.' });
+                return res.status(400).json({ success: false, message: isDec ? 'This senior have passed away, please go to OSCA if you think this is an error' : 'Cannot reactivate — this record is archived. The senior must visit the OSCA office.' });
             }
             const updates = { status: 'Active' };
             if ((u.lifeStatus || '') === 'Inactive') updates.lifeStatus = 'Active';
@@ -1193,7 +1455,14 @@ app.post('/api/verify-login', async (req, res) => {
             return res.json({ success: false, message: 'Your user profile was not found in the database. Please contact an administrator.', code: 'profile-not-found' });
         }
 
-        const userData = userSnap.val();
+        const userData = userSnap.val() || {};
+
+        // Deceased gate: the archived account of a senior who passed away can
+        // never log in again, even with a still-valid token. The message below
+        // is shown by the login screen (see public/js/main.js).
+        if (String(userData.lifeStatus || '') === 'Deceased' || String(userData.status || '') === 'Deceased') {
+            return res.json({ success: false, message: 'This senior have passed away, please go to OSCA if you think this is an error', code: 'account-deceased' });
+        }
 
         // Check maintenance mode for non-admins
         let maintenanceMode = false;
@@ -1320,6 +1589,12 @@ app.post('/api/register-senior', requireAuth, requireRole('admin', 'employee'), 
                 if (result && result.synced) console.log(`Senior "${seniorId}" mirrored to Supabase (face: ${result.facePath || 'n/a'}).`);
             }).catch(err => console.error('Supabase senior mirror failed (registration):', err.message));
         }
+
+        // Official welcome SMS (TextBee): a walk-in account is created already
+        // VERIFIED, so the senior is told right away. Fire-and-forget — the
+        // gateway is best-effort and must never delay or break the creation.
+        notifySeniorSms(userRecord.uid, 'account_verified')
+            .catch(err => console.warn('Verification SMS skipped:', err.message));
 
         res.json({ success: true, message: 'Senior citizen account created successfully.', uid: userRecord.uid });
     } catch (error) {
@@ -2556,6 +2831,16 @@ app.post('/api/claims/request', requireAuth, requireRole('senior'), async (req, 
         // even via direct API calls.
         const freshUserSnap = await admin.database().ref(`users/${actor.uid}`).once('value');
         const freshUser = freshUserSnap.val() || {};
+        // ── DECEASED GATE: an account archived as Deceased can never request a
+        // pension/benefit payout, even with a token issued before the archive.
+        if (String(freshUser.lifeStatus || '') === 'Deceased' || String(freshUser.status || '') === 'Deceased') {
+            await writeAuditLog('CLAIM_REQUEST_BLOCKED_DECEASED', actor, actor.uid, null,
+                `Blocked ${type} request — account is marked Deceased (archived).`);
+            return res.status(403).json({
+                success: false,
+                message: 'This senior have passed away, please go to OSCA if you think this is an error'
+            });
+        }
         if (freshUser.kycStatus !== 'Verified') {
             await writeAuditLog('CLAIM_REQUEST_BLOCKED_UNVERIFIED', actor, actor.uid, null,
                 `Blocked ${type} request — KYC status: ${freshUser.kycStatus || 'Not Verified'}`);
@@ -2663,6 +2948,17 @@ app.post('/api/claims/record', requireAuth, requireRole('admin', 'employee'), as
         if (!userSnap.exists()) return res.status(404).json({ success: false, message: 'Senior citizen record not found.' });
         const user = userSnap.val();
 
+        // Deceased gate: an archived Deceased senior must never receive a
+        // payout, even through a direct API call with a stale dashboard.
+        if (String(user.lifeStatus || '') === 'Deceased' || String(user.status || '') === 'Deceased') {
+            await writeAuditLog('BENEFIT_RELEASE_BLOCKED_DECEASED', actor, uid, null,
+                `Blocked "${benefitType}" release — account is marked Deceased (archived).`);
+            return res.status(403).json({
+                success: false,
+                message: 'This senior have passed away, please go to OSCA if you think this is an error'
+            });
+        }
+
         // 1) Eligibility gate — the system only ASSISTS; ineligible seniors are blocked here
         //    and the final release is always performed by the staff member.
         const eligibility = evaluateEligibility(user);
@@ -2728,6 +3024,16 @@ app.post('/api/claims/record', requireAuth, requireRole('admin', 'employee'), as
             createdAt: Date.now(),
             type: 'benefit'
         });
+
+        // Official release SMS (TextBee) — same event the portal notification
+        // announces, now sent to the senior's mobile number. Best-effort:
+        // never awaited, so a sleeping gateway cannot delay the staff member.
+        notifySeniorSms(uid, /pension/i.test(benefitType) ? 'pension_released' : 'claim_released', {
+            amount: String(amountNum),
+            serviceType: benefitType,
+            refNumber: claimRef.key.slice(-8).toUpperCase(),
+            period: period
+        }).catch(err => console.warn('Release SMS skipped:', err.message));
 
         res.json({
             success: true,
@@ -3629,8 +3935,10 @@ app.post('/api/eligibility/check', requireAuth, requireRole('admin', 'employee')
             checkedBy: actor.uid
         };
         
-        if (user.status !== 'Active') {
-            eligibility.reason = 'Senior status is not Active';
+        if (user.status !== 'Active' || String(user.lifeStatus || 'Active') !== 'Active') {
+            eligibility.reason = (String(user.lifeStatus || '') === 'Deceased' || String(user.status || '') === 'Deceased')
+                ? 'Senior is marked Deceased — account archived, no pension or benefit'
+                : 'Senior status is not Active';
             return res.json({ success: true, eligibility: eligibility });
         }
         
@@ -3705,7 +4013,19 @@ app.post('/api/claims/submit', requireAuth, requireRole('admin', 'employee'), as
         const userSnap = await admin.database().ref('users/' + uid).once('value');
         if (!userSnap.exists()) return res.status(404).json({ success: false, message: 'Senior not found.' });
         const user = userSnap.val();
-        
+
+        // Deceased gate: an archived Deceased senior must never have a new claim
+        // filed against their record, even through a direct API call with a
+        // stale dashboard (the UI already hides these seniors).
+        if (String(user.lifeStatus || '') === 'Deceased' || String(user.status || '') === 'Deceased') {
+            await writeAuditLog('CLAIM_SUBMIT_BLOCKED_DECEASED', actor, uid, null,
+                `Blocked claim submission for ${user.name || uid} — account is marked Deceased (archived).`);
+            return res.status(403).json({
+                success: false,
+                message: 'This senior have passed away, please go to OSCA if you think this is an error'
+            });
+        }
+
         const duplicateCheck = await checkDuplicateClaim(uid, benefitId, serviceMonth);
         if (duplicateCheck.duplicate) {
             await writeAuditLog('CLAIM_DUPLICATE', actor, uid, duplicateCheck.claimId, 
@@ -3867,6 +4187,30 @@ app.put('/api/claims/:claimId/status', requireAuth, requireRole('admin', 'employ
         }
         
         await admin.database().ref('claims/' + claimId).update(updates);
+
+        // Official status SMS (TextBee) — best-effort and never awaited, so a
+        // sleeping gateway can never delay the staff member's status change:
+        //   Approved / Processing -> "releasing" (payout is being prepared)
+        //   Paid                  -> "released"  (money handed to the senior)
+        //   Rejected              -> declined notice, with the stated reason
+        const claimLabel = String(claim.serviceType || claim.benefitType || 'Assistance');
+        const isPensionClaim = /pension/i.test(claimLabel);
+        const smsUid = claim.uid || claim.seniorUid;
+        const smsCommon = {
+            amount: String(claim.amount || claim.paidAmount || ''),
+            serviceType: claimLabel,
+            refNumber: claim.refNumber || String(claimId).slice(-8).toUpperCase()
+        };
+        if (smsUid && (status === 'Approved' || status === 'Processing')) {
+            notifySeniorSms(smsUid, isPensionClaim ? 'pension_releasing' : 'claim_releasing', smsCommon)
+                .catch(err => console.warn('Releasing SMS skipped:', err.message));
+        } else if (smsUid && status === 'Paid') {
+            notifySeniorSms(smsUid, isPensionClaim ? 'pension_released' : 'claim_released', smsCommon)
+                .catch(err => console.warn('Released SMS skipped:', err.message));
+        } else if (smsUid && status === 'Rejected') {
+            notifySeniorSms(smsUid, 'claim_declined', { ...smsCommon, reason: updates.rejectionReason })
+                .catch(err => console.warn('Decline SMS skipped:', err.message));
+        }
         
         await writeAuditLog('CLAIM_STATUS_UPDATED', actor, claim.uid, claimId, 
             'Claim ' + status);

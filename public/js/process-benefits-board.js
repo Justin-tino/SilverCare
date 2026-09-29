@@ -32,12 +32,21 @@
       Object.entries(users).forEach(function (entry) {
         var u = entry[1];
         if (!u || u.role !== 'senior') return;
+        // Deceased accounts stay in history but never show as live payouts —
+        // skip them in the claimed-pension board column too.
+        if (String(u.lifeStatus || '') === 'Deceased' || String(u.status || '') === 'Deceased') return;
+        if (u.pensionSuspended) return;
         var benefits = (u.benefits && typeof u.benefits === 'object') ? Object.values(u.benefits) : [];
         benefits.forEach(function (b) {
           if (!b || !/pension/i.test(String(b.title || ''))) return;
           rows.push({
             name: u.name || 'Senior', sid: u.seniorId || '-',
-            amount: b.amount || (u.pensionAmount ? ('PHP ' + Number(u.pensionAmount).toLocaleString()) : '-'),
+            amount: b.amount || (function () {
+              var _l = Number(u.pensionLocalAmount) || Number(u.pensionAmount) || 0;
+              var _n = Number(u.pensionNationalAmount) || 0;
+              var _q = _l * 3 + _n;
+              return _q > 0 ? ('Local ₱' + _l.toLocaleString() + '/mo + National ₱' + _n.toLocaleString() + '/qtr') : '-';
+            })(),
             ref: b.refNumber || b.reference || '-', when: b.approvedAt || b.createdAt || u.lastPensionMonth || ''
           });
         });
@@ -45,7 +54,7 @@
       rows.sort(function (a, b) { return String(b.when).localeCompare(String(a.when)); });
       setText('pbMiniClaimedPension', rows.length + ' released');
       if (!rows.length) {
-        box.innerHTML = '<div style="text-align:center;color:#71717a;padding:18px 12px;border:1px dashed #d4d4d8;border-radius:4px;font-size:0.85rem;">No claimed pension payouts yet.<br>Released monthly pensions appear here.</div>';
+        box.innerHTML = '<div style="text-align:center;color:#71717a;padding:18px 12px;border:1px dashed #d4d4d8;border-radius:4px;font-size:0.85rem;">No claimed pension payouts yet.<br>Released Local + National pension payouts appear here.</div>';
         return;
       }
       var h = rows.slice(0, 30).map(function (r) {
@@ -93,7 +102,7 @@
   // ── Generate Reports: appointments + benefits totals ───────────────────────
   // Live totals computed from the same data the board renders:
   //   queue  → seniors who made appointments / successful / pending / declined
-  //   users  → total monthly pension configured across all seniors (PHP)
+  //   users  → total quarterly Local + National pension allocation across all seniors (PHP)
   //   claims → total claimed assistance (paid/claimed claims, PHP)
   function fmtPhp(v) { return 'PHP ' + Number(v || 0).toLocaleString(); }
 
@@ -118,8 +127,13 @@
     var pensionTotal = 0, withPension = 0;
     Object.values(users).forEach(function (u) {
       if (!u || u.role !== 'senior') return;
-      var amt = Number(u.pensionAmount) || 0;
-      if (amt > 0) { pensionTotal += amt; withPension++; }
+      // Deceased accounts stop receiving pension — keep them out of totals.
+      if (String(u.lifeStatus || '') === 'Deceased' || String(u.status || '') === 'Deceased') return;
+      if (u.pensionSuspended) return;
+      var _l = Number(u.pensionLocalAmount) || Number(u.pensionAmount) || 0;
+      var _n = Number(u.pensionNationalAmount) || 0;
+      var _q = _l * 3 + _n;
+      if (_l > 0 && _n > 0) { pensionTotal += _q; withPension++; }
     });
     var assistanceTotal = 0, claimedCount = 0;
     Object.values(claims).forEach(function (c) {
@@ -178,8 +192,8 @@
       L.push(['Declined Appointments', s.declined]);
       L.push([]);
       L.push(['BENEFITS SUMMARY']);
-      L.push(['Total Monthly Pension Given (all seniors)', fmtPhp(s.pensionTotal)]);
-      L.push(['Seniors With Monthly Pension', s.withPension]);
+      L.push(['Total Quarterly Pension Given (all seniors)', fmtPhp(s.pensionTotal)]);
+      L.push(['Seniors With Pension', s.withPension]);
       L.push(['Total Claimed Assistance', fmtPhp(s.assistanceTotal)]);
       L.push(['Assistance Claims Paid', s.claimedCount]);
       L.push(['Combined Total (Pension + Assistance)', fmtPhp(s.combinedTotal)]);
@@ -199,12 +213,16 @@
         ]);
       });
       L.push([]);
-      L.push(['MONTHLY PENSION CONFIGURED']);
-      L.push(['Senior Name', 'OSCA ID', 'Monthly Amount', 'Set On', 'Set By']);
+      L.push(['PENSION CONFIGURED (Local monthly + National quarterly)']);
+      L.push(['Senior Name', 'OSCA ID', 'Local (Monthly)', 'National (Quarterly)', 'Quarterly Total', 'Set On', 'Set By']);
       Object.values(users).forEach(function (u) {
-        if (!u || u.role !== 'senior' || !u.pensionAmount) return;
-        L.push([
-          u.name || 'Senior', u.seniorId || 'N/A', fmtPhp(u.pensionAmount),
+        if (!u || u.role !== 'senior') return;
+        // Deceased accounts no longer receive pension — exclude from the report.
+        if (String(u.lifeStatus || '') === 'Deceased' || String(u.status || '') === 'Deceased' || u.pensionSuspended) return;
+        var _l = Number(u.pensionLocalAmount) || Number(u.pensionAmount) || 0;
+        var _n = Number(u.pensionNationalAmount) || 0;
+        if (_l > 0 && _n > 0) L.push([
+          u.name || 'Senior', u.seniorId || 'N/A', fmtPhp(_l), fmtPhp(_n), fmtPhp(_l * 3 + _n),
           u.pensionSetAt ? new Date(Number(u.pensionSetAt)).toLocaleDateString() : '',
           u.pensionSetBy || ''
         ]);
@@ -276,8 +294,15 @@
       Object.entries(users).forEach(function (entry) {
         var u = entry[1];
         if (!u || u.role !== 'senior') return;
-        if (u.pensionAmount) rows.push(['Pension-configured', u.name || '', u.seniorId || '', 'Monthly pension', 'PHP ' + Number(u.pensionAmount).toLocaleString(), u.pensionSetBy || '', u.pensionSetAt ? new Date(Number(u.pensionSetAt)).toLocaleDateString() : '']);
+        // Deceased accounts stop receiving pension — keep them out of exports.
+        var _dec = String(u.lifeStatus || '') === 'Deceased' || String(u.status || '') === 'Deceased' || u.pensionSuspended;
+        var _l = Number(u.pensionLocalAmount) || Number(u.pensionAmount) || 0;
+        var _n = Number(u.pensionNationalAmount) || 0;
+        if (!_dec && _l > 0 && _n > 0) rows.push(['Pension-configured', u.name || '', u.seniorId || '', 'Local monthly + National quarterly', 'Local PHP ' + _l.toLocaleString() + ' + National PHP ' + _n.toLocaleString() + ' (Qtr PHP ' + (_l * 3 + _n).toLocaleString() + ')', u.pensionSetBy || '', u.pensionSetAt ? new Date(Number(u.pensionSetAt)).toLocaleDateString() : '']);
         var benefits = (u.benefits && typeof u.benefits === 'object') ? Object.values(u.benefits) : [];
+        // Pension payouts of archived Deceased accounts stay in audit history
+        // (claimed / paid records) but must never reappear as live pension rows.
+        if (_dec) return;
         benefits.forEach(function (b) {
           if (!b || !/pension/i.test(String(b.title || ''))) return;
           rows.push(['Pension-claimed', u.name || '', u.seniorId || '', b.title || '', b.amount || '', b.refNumber || b.reference || '', b.approvedAt ? new Date(Number(b.approvedAt)).toLocaleDateString() : '']);
@@ -319,10 +344,8 @@
     // matched live against the DB (claim.refNumber = senior notification ref).
     var r = $('processBenefitsRefresh');
     if (r) r.addEventListener('click', function () { renderClaimedPensions(); refreshCounts(); applySearch(); if (window.scNotify) window.scNotify('success', 'Board refreshed.'); });
-    var x = $('processBenefitsExport');
-    if (x) x.addEventListener('click', exportBoard);
-    var g = $('pbGenerateReport');
-    if (g) g.addEventListener('click', generateReportCsv);
+    // Report buttons are owned by pb-comprehensive-report.js (PDF/Excel modal).
+    // Legacy CSV exports (exportBoard / generateReportCsv below) are retired.
     var pr = $('pbPrintReport');
     if (pr) pr.addEventListener('click', function () { window.print(); });
     var p = $('processBenefitsPrint');

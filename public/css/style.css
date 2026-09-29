@@ -197,24 +197,34 @@ body {
 }
 
 .nav-pill {
-    padding: 10px 25px;
-    border-radius: 20px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 9px 16px;
+    border-radius: 999px;
     font-weight: 600;
-    font-size: 0.95rem;
-    color: var(--text-main);
+    font-size: 0.83rem;
+    line-height: 1;
+    white-space: nowrap;
+    flex-shrink: 0;
+    color: #334155;
     text-decoration: none;
     cursor: pointer;
-    transition: all 0.2s;
+    transition: all 0.18s ease;
+    border: none;
+    background: transparent;
+    font-family: inherit;
 }
 
 .nav-pill.active {
-    background: #3b82f6;
+    background: linear-gradient(135deg, #2563eb, #1d4ed8);
     color: white;
-    box-shadow: 0 4px 10px rgba(59, 130, 246, 0.3);
+    box-shadow: 0 4px 12px rgba(37, 99, 235, 0.35), inset 0 1px 0 rgba(255,255,255,0.2);
 }
 
 .nav-pill:hover:not(.active) {
-    background: #f1f5f9;
+    background: #e0e7ff;
+    color: #1e40af;
 }
 
 .dashboard-container {
@@ -473,5 +483,201 @@ input[type=range] {
     -webkit-appearance: none;
     margin: 0;
 }
+
+/* ══════════════════════════════════════════════════════════════
+   UNIFIED TOP HEADER REDESIGN — admin / employee / senior
+   CSS-only: tames inline styles, forces compact single-line pills.
+   No HTML/JS touched.
+   ══════════════════════════════════════════════════════════════ */
+
+/* Compact header bar — GRID for true optical centering */
+body > header,
+.portal-header {
+    display: grid !important;
+    grid-template-columns: 1fr auto 1fr !important;
+    align-items: center !important;
+    height: 86px !important;
+    min-height: 86px !important;
+    padding: 0 26px !important;
+    gap: 16px !important;
+    flex-wrap: nowrap !important;
+}
+
+/* Logo — left cell, bigger and crisp */
+body > header div:first-child,
+.portal-header > div:first-child {
+    grid-column: 1 !important;
+    grid-row: 1 !important;
+    justify-self: start !important;
+    width: auto !important;
+    flex-shrink: 0 !important;
+    display: flex !important;
+    align-items: center !important;
+    min-width: 0 !important;
+}
+body > header div:first-child img,
+.portal-header > div:first-child img {
+    height: 54px !important;
+    width: auto !important;
+    max-width: 250px !important;
+    object-fit: contain !important;
+    display: block !important;
+    transform: none !important;
+}
+
+/* Center pill container — grid column 2, truly centered on the page */
+body > header nav,
+.portal-header nav,
+#tabContainer {
+    grid-column: 2 !important;
+    grid-row: 1 !important;
+    justify-self: center !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    flex-wrap: nowrap !important;
+    gap: 2px !important;
+    background: #f1f5f9 !important;
+    padding: 5px !important;
+    border-radius: 999px !important;
+    border: 1px solid #e2e8f0 !important;
+    overflow-x: auto !important;
+    overflow-y: hidden !important;
+    flex: 0 1 auto !important;
+    margin: 0 auto !important;
+    min-width: 0 !important;
+    max-width: 100% !important;
+    scrollbar-width: none !important;
+    -ms-overflow-style: none !important;
+}
+body > header nav::-webkit-scrollbar,
+.portal-header nav::-webkit-scrollbar,
+#tabContainer::-webkit-scrollbar { display: none !important; }
+
+/* Pills — compact, single line, never wrap or stretch tall */
+.nav-pill,
+.emp-nav-pill {
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    white-space: nowrap !important;
+    flex: 0 0 auto !important;
+    padding: 8px 14px !important;
+    border-radius: 999px !important;
+    font-size: 0.82rem !important;
+    font-weight: 600 !important;
+    line-height: 1.2 !important;
+    font-family: inherit !important;
+    border: none !important;
+    text-decoration: none !important;
+    transition: all 0.18s ease !important;
+}
+.nav-pill:not(.active),
+.emp-nav-pill:not(.active),
+#tabContainer .nav-pill:not(.active) {
+    background: transparent !important;
+    color: #334155 !important;
+}
+.nav-pill.active,
+.emp-nav-pill.active,
+#tabContainer .nav-pill.active {
+    background: linear-gradient(135deg, #2563eb, #1d4ed8) !important;
+    color: #fff !important;
+    box-shadow: 0 4px 12px rgba(37,99,235,0.35), inset 0 1px 0 rgba(255,255,255,0.2) !important;
+}
+.nav-pill:hover:not(.active),
+.emp-nav-pill:hover:not(.active),
+#tabContainer .nav-pill:hover:not(.active) {
+    background: #e0e7ff !important;
+    color: #1e40af !important;
+}
+.nav-pill i,
+.emp-nav-pill i { margin-right: 6px !important; font-size: 0.8em !important; }
+
+/* Preserve the red "Get Verified" alert cue on senior portal */
+#navPillVerification:not(.active) {
+    color: #dc2626 !important;
+}
+#navPillVerification:not(.active):hover {
+    background: #fee2e2 !important;
+    color: #b91c1c !important;
+}
+
+/* Right user menu — right cell, compact, never squeezes the nav */
+body > header > div:last-child,
+.portal-header > div:last-child {
+    grid-column: 3 !important;
+    grid-row: 1 !important;
+    justify-self: end !important;
+    width: auto !important;
+    flex-shrink: 0 !important;
+    gap: 12px !important;
+    margin-left: 0 !important;
+}
+body > header > div:last-child div:first-child,
+.portal-header .header-greeting {
+    max-width: 180px !important;
+    overflow: hidden !important;
+}
+#employeeGreeting,
+#portalGreeting {
+    white-space: nowrap !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    font-size: 0.85rem !important;
+}
+
+/* Wide screens: nav is already grid-centered — just let it size naturally */
+@media (min-width: 1281px) {
+    body > header nav,
+    .portal-header nav,
+    #tabContainer {
+        justify-content: center !important;
+    }
+}
+/* Narrower desktops: let pills scroll, keep user menu visible */
+@media (max-width: 1280px) {
+    body > header,
+    .portal-header { padding: 0 14px !important; }
+    body > header nav,
+    .portal-header nav,
+    #tabContainer { max-width: 55vw !important; }
+}
+/* Senior portal has an extra mobile-menu button + overlay INSIDE the
+   header grid — take them out of the 3-column flow so the layout holds */
+.portal-header #mobileMenuToggle,
+.portal-header #mobileSidebarOverlay {
+    grid-column: 1 / -1 !important;
+    grid-row: auto !important;
+    justify-self: stretch !important;
+}
+.portal-header #mobileSidebarOverlay { display: none !important; }
+.portal-header #mobileSidebarOverlay.visible { display: block !important; }
+@media (max-width: 900px) {
+    body > header,
+    .portal-header {
+        display: flex !important;
+        height: auto !important;
+        min-height: 60px !important;
+        flex-wrap: wrap !important;
+        padding: 8px 12px !important;
+    }
+    body > header div:first-child,
+    .portal-header > div:first-child { flex: 1 1 auto !important; }
+    body > header div:first-child img,
+    .portal-header > div:first-child img { height: 46px !important; }
+    .portal-header #mobileMenuToggle { display: flex !important; order: 2 !important; }
+    .portal-header > div:first-child { order: 1 !important; }
+    .portal-header > div:last-child { order: 3 !important; }
+    body > header nav,
+    .portal-header nav,
+    #tabContainer {
+        order: 4 !important;
+        width: 100% !important;
+        max-width: 100% !important;
+        flex-basis: 100% !important;
+    }
+}
+
 
 

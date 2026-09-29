@@ -17,7 +17,7 @@
             font-weight: 500;
         }
 
-        /* Pill modifications for employee */
+        /* Pill modifications for employee — unified compact single-line pills */
         .emp-nav-menu {
             display: flex;
             justify-content: center;
@@ -29,24 +29,35 @@
         }
 
         .emp-nav-pill {
-            padding: 12px 30px;
-            border-radius: 25px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            padding: 9px 16px;
+            border-radius: 999px;
             font-weight: 600;
-            font-size: 0.95rem;
-            color: #1e293b;
+            font-size: 0.83rem;
+            line-height: 1.2;
+            white-space: nowrap;
+            flex-shrink: 0;
+            color: #334155;
             text-decoration: none;
             cursor: pointer;
-            transition: all 0.2s;
+            transition: all 0.18s ease;
+            border: none;
+            background: transparent;
+            font-family: inherit;
+            text-align: center;
         }
 
         .emp-nav-pill.active {
-            background: #2563eb;
+            background: linear-gradient(135deg, #2563eb, #1d4ed8);
             color: white;
-            box-shadow: 0 4px 10px rgba(37, 99, 235, 0.3);
+            box-shadow: 0 4px 12px rgba(37, 99, 235, 0.35), inset 0 1px 0 rgba(255,255,255,0.2);
         }
 
         .emp-nav-pill:hover:not(.active) {
-            background: #f1f5f9;
+            background: #e0e7ff;
+            color: #1e40af;
         }
 
         /* List Rows */
@@ -541,6 +552,10 @@
                 <i class="fas fa-box-archive" style="margin-right: 6px;"></i>Archive
             </a>
 
+            <a class="emp-nav-pill" onclick="switchEmpTab('seniors', this)" title="Manage Seniors — view and edit senior account information">
+                <i class="fas fa-users" style="margin-right: 6px;"></i>Manage Seniors
+            </a>
+
             <a class="emp-nav-pill" onclick="switchEmpTab('notifications', this)" style="position: relative;">
                 Notifications
                 <span id="empNotifBadge" style="display: none; position: absolute; top: 2px; right: 5px; width: 10px; height: 10px; background-color: #ef4444; border-radius: 50%; border: 2px solid white; box-shadow: 0 0 5px rgba(239, 68, 68, 0.5);"></span>
@@ -973,18 +988,18 @@
                 <div class="pb-ledger-toolbar">
                     <div class="pb-ledger-title">
                         <h3>Benefits Processing</h3>
-                        <p>Same workflow, manageable board: <strong>Monthly Pension</strong> &rarr; <strong>Claimed Monthly Pension</strong> &rarr; <strong>Approved Assistance Claims</strong>.</p>
+                        <p>Same workflow, manageable board: <strong>Dual Pension</strong> &rarr; <strong>Released Pension</strong> &rarr; <strong>Approved Assistance Claims</strong>.</p>
                     </div>
                     <div class="pb-ledger-tools">
                         <input id="processBenefitsSearch" class="pb-search" type="text" placeholder="Search name, ID, claim, ref..." aria-label="Search board">
                         <button type="button" class="pb-btn" id="processBenefitsRefresh" title="Re-count board"><i class="fas fa-rotate"></i> Refresh</button>
-                        <button type="button" class="pb-btn pb-btn-dark" id="processBenefitsExport" title="Download visible data as CSV"><i class="fas fa-file-csv"></i> Export CSV</button>
+                        <button type="button" class="pb-btn pb-btn-dark" id="processBenefitsExport" title="Generate comprehensive report (PDF / Excel)"><i class="fas fa-file-lines"></i> Generate Report</button>
                         <button type="button" class="pb-btn" id="processBenefitsPrint" title="Print board"><i class="fas fa-print"></i> Print</button>
                     </div>
                 </div>
                 <div class="pb-stat-strip" aria-label="Board totals" style="margin-bottom:20px;">
                     <div><b id="pbStatPendingSetup">0</b><span>Pending Pension Setup</span></div>
-                    <div><b id="pbStatWithPension">0</b><span>With Monthly Pension</span></div>
+                    <div><b id="pbStatWithPension">0</b><span>With Dual Pension</span></div>
                     <div><b id="pbStatToPayout">0</b><span>Assistance To Payout</span></div>
                     <div><b id="pbStatClaimed">0</b><span>Assistance Claimed</span></div>
                 </div>
@@ -996,11 +1011,12 @@
                             <p style="margin:4px 0 0; color:#52525b; font-size:0.8rem;">Live totals of senior appointments and benefits disbursement &mdash; all included in the exported report.</p>
                         </div>
                         <div style="display:flex; gap:8px; flex-wrap:wrap;">
-                            <button type="button" class="pb-btn pb-btn-dark" id="pbGenerateReport" title="Download the full appointments &amp; benefits report as CSV"><i class="fas fa-file-csv"></i> Generate Report (CSV)</button>
+                            <button type="button" class="pb-btn pb-btn-dark" id="pbGenerateReport" title="Generate comprehensive report (PDF / Excel)"><i class="fas fa-file-lines"></i> Generate Report (PDF / Excel)</button>
                             <button type="button" class="pb-btn" id="pbPrintReport" title="Print the report"><i class="fas fa-print"></i> Print</button>
                         </div>
                     </div>
                     <div style="padding:14px 16px;">
+                        <p style="margin:0 0 10px; color:#52525b; font-size:0.8rem;">Comprehensive report includes: <strong>senior population</strong> (per barangay, status, sex) · <strong>pension &amp; assistance summaries</strong> · <strong>health status &amp; high-risk cases</strong> · <strong>pending applications &amp; compliance</strong>. Choose <strong>PDF</strong> or <strong>Excel</strong> from the report dialog.</p>
                         <p class="pb-subhead">Appointments</p>
                         <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(160px, 1fr)); gap:10px;">
                             <div style="border:1px solid #e4e4e7; border-radius:6px; padding:12px 14px; background:#fcfcfc;">
@@ -1028,7 +1044,7 @@
                         <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(200px, 1fr)); gap:10px;">
                             <div style="border:1px solid #e4e4e7; border-radius:6px; padding:12px 14px; background:#fcfcfc;">
                                 <b id="pbRepPensionTotal" style="display:block; font-size:1.35rem; color:#166534;">PHP 0</b>
-                                <span style="font-size:0.76rem; color:#71717a; font-weight:600;">Total Monthly Pension Given (All Seniors)</span>
+                <span style="font-size:0.76rem; color:#71717a; font-weight:600;">Total Quarterly Pension Allocation (Local + National)</span>
                             </div>
                             <div style="border:1px solid #e4e4e7; border-radius:6px; padding:12px 14px; background:#fcfcfc;">
                                 <b id="pbRepAssistanceTotal" style="display:block; font-size:1.35rem; color:#0e7490;">PHP 0</b>
@@ -1041,37 +1057,64 @@
                         </div>
                     </div>
                 </div>
-                <!-- ROW 1 (full width): Monthly Pension setup tables -->
+                <!-- ROW 0: Global Pension Amounts (Local Monthly + National Quarterly) -->
                 <div class="pb-section">
                     <div class="pb-section-head">
-                        <span>Monthly Pension <span class="pb-count" id="pbCountCol1">0</span>
-                            <span class="pb-sub">Pending Account + Senior Accounts with Monthly Pension — full width so columns never squeeze</span>
+                        <span>Pension Amount Settings
+                            <span class="pb-sub">One amount per program — saving updates ALL senior accounts automatically</span>
+                        </span>
+                        <span class="pb-mini" id="pbMiniPensionSettings">Local ₱1,000/mo · National ₱3,000/quarter</span>
+                    </div>
+                    <div class="pb-section-body">
+                        <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(240px, 1fr)); gap:12px; align-items:end;">
+                            <div>
+                                <label for="pensionLocalInput" style="display:block; font-size:0.8rem; font-weight:700; color:#475569; margin-bottom:6px;">Local Pension — Monthly Amount (₱)</label>
+                                <input type="number" id="pensionLocalInput" min="0" step="1" value="1000" placeholder="e.g. 1000" style="width:100%; padding:10px 12px; border:1px solid #cbd5e1; border-radius:8px; font-size:0.95rem; box-sizing:border-box;">
+                                <div style="font-size:0.75rem; color:#71717a; margin-top:4px;">Received every month. 3 months = <b id="pensionLocalQtrPreview">₱3,000</b></div>
+                            </div>
+                            <div>
+                                <label for="pensionNationalInput" style="display:block; font-size:0.8rem; font-weight:700; color:#475569; margin-bottom:6px;">National Pension — Quarterly Amount (₱)</label>
+                                <input type="number" id="pensionNationalInput" min="0" step="1" value="3000" placeholder="e.g. 3000" style="width:100%; padding:10px 12px; border:1px solid #cbd5e1; border-radius:8px; font-size:0.95rem; box-sizing:border-box;">
+                                <div style="font-size:0.75rem; color:#71717a; margin-top:4px;">Received every 3 months. Quarterly total = <b id="pensionQuarterGrandPreview">₱6,000</b></div>
+                            </div>
+                            <div>
+                                <button type="button" id="pensionSettingsSaveBtn" style="width:100%; border:none; background:#166534; color:#fff; padding:11px 16px; border-radius:8px; font-weight:700; font-size:0.9rem; cursor:pointer;"><i class="fas fa-save" style="margin-right:6px;"></i>Save changes</button>
+                                <div id="pensionSettingsStatus" style="font-size:0.78rem; color:#64748b; margin-top:6px;">Changes apply to all senior accounts.</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <!-- ROW 1 (full width): Local + National pension setup tables -->
+                <div class="pb-section">
+                    <div class="pb-section-head">
+                        <span>Senior Pensions <span class="pb-count" id="pbCountCol1">0</span>
+                            <span class="pb-sub">Pending Account + Senior Accounts with Pension — full width so columns never squeeze</span>
                         </span>
                         <span class="pb-mini" id="pbMiniPending">0 waiting</span>
                     </div>
                     <div class="pb-section-body">
-                        <p class="pb-subhead">Pending Account</p>
+                        <p class="pb-subhead">Pending Account (verified, no pension yet)</p>
                         <span id="pensionSetupBadge" style="display:none;">0</span>
                         <div id="pensionSetupContainer" class="pb-wide-table">
                             <div style="text-align: center; color: #71717a; padding: 20px;">Loading senior data...</div>
                         </div>
-                        <p class="pb-subhead" style="margin-top:18px;">Senior Accounts with Monthly Pension <span class="pb-mini" id="pbMiniConfigured">0 active</span></p>
+                        <p class="pb-subhead" style="margin-top:18px;">Senior Accounts with Pension <span class="pb-mini" id="pbMiniConfigured">0 active</span></p>
                         <div id="pensionConfiguredContainer" class="pb-wide-table">
                             <div style="text-align: center; color: #71717a; padding: 14px;">No pensions configured yet.</div>
                         </div>
                     </div>
                 </div>
-                <!-- ROW 2 (full width): Claimed Monthly Pension -->
+                <!-- ROW 2 (full width): Released Local + National Pension -->
                 <div class="pb-section">
                     <div class="pb-section-head">
-                        <span>Claimed Monthly Pension <span class="pb-count" id="pbCountCol2">0</span>
+                        <span>Released Local + National Pension <span class="pb-count" id="pbCountCol2">0</span>
                             <span class="pb-sub">Released pension payouts (read-only, built from the same benefits data)</span>
                         </span>
                         <span class="pb-mini" id="pbMiniClaimedPension">0 released</span>
                     </div>
                     <div class="pb-section-body">
                         <div id="pensionClaimedContainer" style="max-height:380px; overflow-y:auto; overflow-x:hidden; display:flex; flex-direction:column; gap:10px;">
-                            <div style="text-align:center; color:#71717a; padding:18px 12px; border:1px dashed #d4d4d8; border-radius:4px; font-size:0.85rem;">No claimed pension payouts yet.<br>Released monthly pensions appear here.</div>
+                            <div style="text-align:center; color:#71717a; padding:18px 12px; border:1px dashed #d4d4d8; border-radius:4px; font-size:0.85rem;">No claimed pension payouts yet.<br>Released Local + National pension payouts appear here.</div>
                         </div>
                     </div>
                 </div>
@@ -1221,10 +1264,17 @@
                     <h3 style="margin: 0; color: #1e293b; font-size: 1.1rem; border-bottom: 2px solid #1e293b; padding-bottom: 10px;">
                         Archived Senior Citizen Records
                     </h3>
-                    <div style="position: relative; min-width: 260px; flex: 1; max-width: 380px;">
-                        <i class="fas fa-search" style="position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: #94a3b8; font-size: 0.85rem;"></i>
-                        <input type="text" id="archiveSearchInput" placeholder="Search name, OSCA ID, email, or status..." oninput="renderArchiveList()"
-                            style="width: 100%; padding: 10px 14px 10px 34px; border: 1px solid #cbd5e1; border-radius: 8px; font-size: 0.88rem; font-family: 'Inter', sans-serif; outline: none;" />
+                    <div style="display: flex; align-items: center; justify-content: flex-end; gap: 10px; flex: 1; min-width: 260px; max-width: 520px; flex-wrap: wrap;">
+                        <div style="position: relative; flex: 1; min-width: 220px; max-width: 380px;">
+                            <i class="fas fa-search" style="position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: #94a3b8; font-size: 0.85rem;"></i>
+                            <input type="text" id="archiveSearchInput" placeholder="Search name, OSCA ID, email, or status..." oninput="renderArchiveList()"
+                                style="width: 100%; padding: 10px 14px 10px 34px; border: 1px solid #cbd5e1; border-radius: 8px; font-size: 0.88rem; font-family: 'Inter', sans-serif; outline: none; box-sizing: border-box;" />
+                        </div>
+                        <button type="button" id="archivePrintDeceasedBtn" onclick="window.printDeceasedSeniors()"
+                            title="Print the list of all deceased senior citizens"
+                            style="background: #ffffff; color: #1e293b; border: 1px solid #cbd5e1; padding: 10px 16px; border-radius: 8px; font-weight: 700; font-size: 0.85rem; font-family: 'Inter', sans-serif; cursor: pointer; white-space: nowrap; display: inline-flex; align-items: center; gap: 7px;">
+                            <i class="fas fa-print" style="color: #92400e;"></i> Print
+                        </button>
                     </div>
                 </div>
                 <p style="color: #64748b; font-size: 0.82rem; margin: 8px 0 18px;">
@@ -1279,7 +1329,61 @@
 
         </div>
 
-        <!-- TAB 5: NOTIFICATIONS -->
+        <!-- TAB 5: MANAGE SENIORS (senior account info — editable by employee) -->
+        <div id="tab-seniors" class="tab-content" style="display: none;">
+            <div style="background: white; padding: 30px; border-radius: 12px; box-shadow: 0 2px 10px rgba(0,0,0,0.02); border: 1px solid #e2e8f0;">
+
+                <div style="display: flex; justify-content: space-between; align-items: center; gap: 15px; flex-wrap: wrap; margin-bottom: 6px;">
+                    <h3 style="margin: 0; color: #1e293b; font-size: 1.15rem;">
+                        <i class="fas fa-users" style="color: #2563eb; margin-right: 8px;"></i>Manage Seniors
+                    </h3>
+                    <div style="position: relative; min-width: 260px; flex: 1; max-width: 380px;">
+                        <i class="fas fa-search" style="position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: #94a3b8; font-size: 0.85rem;"></i>
+                        <input type="text" id="seniorSearchInput" oninput="window.filterManageSeniors()" placeholder="Search by name, Senior ID, email, address..."
+                            style="width: 100%; padding: 10px 12px 10px 34px; border: 1px solid #cbd5e1; border-radius: 8px; font-size: 0.88rem; box-sizing: border-box; outline: none;">
+                    </div>
+                </div>
+                <p style="margin: 0 0 18px; color: #64748b; font-size: 0.85rem; line-height: 1.5;">
+                    Review every senior account in one place. Use <strong>Edit</strong> to correct the senior's account
+                    information (name, Senior ID, contact, address, birth date, sex, civil status, barangay/city/province).
+                    Use <strong>Deceased</strong> when a senior citizen has passed away &mdash; the account is moved to the
+                    Archive (recoverable by OSCA staff), stops receiving any pension or benefit, and is blocked from logging in.
+                    All changes are saved to the account and recorded in the system audit trail.
+                </p>
+
+                <div style="display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 16px;">
+                    <button type="button" class="senior-filter-btn active" data-filter="all" onclick="window.setManageSeniorsFilter('all', this)"
+                        style="border: 1px solid #2563eb; background: #eff6ff; color: #1d4ed8; border-radius: 999px; padding: 7px 16px; font-size: 0.8rem; font-weight: 700; cursor: pointer;">All accounts</button>
+                    <button type="button" class="senior-filter-btn" data-filter="active" onclick="window.setManageSeniorsFilter('active', this)"
+                        style="border: 1px solid #cbd5e1; background: white; color: #475569; border-radius: 999px; padding: 7px 16px; font-size: 0.8rem; font-weight: 700; cursor: pointer;">Active</button>
+                    <button type="button" class="senior-filter-btn" data-filter="pending" onclick="window.setManageSeniorsFilter('pending', this)"
+                        style="border: 1px solid #cbd5e1; background: white; color: #475569; border-radius: 999px; padding: 7px 16px; font-size: 0.8rem; font-weight: 700; cursor: pointer;">Pending</button>
+                    <button type="button" class="senior-filter-btn" data-filter="archived" onclick="window.setManageSeniorsFilter('archived', this)"
+                        style="border: 1px solid #cbd5e1; background: white; color: #475569; border-radius: 999px; padding: 7px 16px; font-size: 0.8rem; font-weight: 700; cursor: pointer;">Archived</button>
+                    <span id="seniorCountPill" style="margin-left: auto; align-self: center; font-size: 0.78rem; font-weight: 700; color: #475569; background: #f1f5f9; border: 1px solid #e2e8f0; border-radius: 999px; padding: 6px 14px;">0 accounts</span>
+                </div>
+
+                <div style="overflow-x: auto; border: 1px solid #e2e8f0; border-radius: 10px;">
+                    <table style="width: 100%; border-collapse: collapse; font-size: 0.85rem; min-width: 980px;">
+                        <thead>
+                            <tr style="background: #f8fafc; text-align: left;">
+                                <th style="padding: 12px 14px; color: #475569; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.5px; border-bottom: 1px solid #e2e8f0;">Senior</th>
+                                <th style="padding: 12px 14px; color: #475569; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.5px; border-bottom: 1px solid #e2e8f0;">Senior ID</th>
+                                <th style="padding: 12px 14px; color: #475569; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.5px; border-bottom: 1px solid #e2e8f0;">Contact</th>
+                                <th style="padding: 12px 14px; color: #475569; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.5px; border-bottom: 1px solid #e2e8f0;">Address</th>
+                                <th style="padding: 12px 14px; color: #475569; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.5px; border-bottom: 1px solid #e2e8f0;">Status</th>
+                                <th style="padding: 12px 14px; color: #475569; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.5px; border-bottom: 1px solid #e2e8f0; text-align: right;">Action</th>
+                            </tr>
+                        </thead>
+                        <tbody id="manageSeniorsTableBody">
+                            <tr><td colspan="6" style="padding: 26px; text-align: center; color: #94a3b8;">Loading senior accounts...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- TAB 6: NOTIFICATIONS -->
         <div id="tab-notifications" class="tab-content" style="display: none;">
             <div style="background: white; padding: 36px; border-radius: 16px; box-shadow: 0 4px 25px rgba(0,0,0,0.04); border: 1px solid #f1f5f9;">
 
@@ -1343,7 +1447,103 @@
 
 
 
-    <!-- Claim View Details Modal -->
+    <!-- Manage Seniors: Edit Senior Account modal (part 1) -->
+    <div id="manageSeniorsEditModal" style="display: none; position: fixed; inset: 0; background: rgba(15,23,42,0.6); z-index: 9999; justify-content: center; align-items: center; padding: 20px;">
+        <div style="background: white; border-radius: 16px; max-width: 760px; width: 100%; max-height: 88vh; overflow-y: auto; padding: 30px; border: 1px solid #e2e8f0;">
+            <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; border-bottom: 2px solid #1e293b; padding-bottom: 15px; margin-bottom: 20px;">
+                <div>
+                    <h3 style="margin: 0; color: #1e293b; font-size: 1.15rem;"><i class="fas fa-user-pen" style="color: #2563eb; margin-right: 8px;"></i>Edit Senior Account Info</h3>
+                    <p id="seniorEditSub" style="margin: 4px 0 0; color: #64748b; font-size: 0.82rem;">Update the senior's account information below.</p>
+                </div>
+                <span onclick="window.closeManageSeniorsEditor()" style="font-size: 1.8rem; color: #94a3b8; cursor: pointer; font-weight: bold; line-height: 1;">&times;</span>
+            </div>
+            <input type="hidden" id="seniorEditUid">
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px;">
+                <div style="grid-column: span 2;">
+                    <label style="display: block; font-size: 0.78rem; font-weight: 700; color: #475569; margin-bottom: 5px;">Full Name *</label>
+                    <input type="text" id="seniorEditName" placeholder="Full name" style="width: 100%; padding: 10px 12px; border: 1.5px solid #e2e8f0; border-radius: 8px; font-size: 0.9rem; box-sizing: border-box;">
+                </div>
+                <div>
+                    <label style="display: block; font-size: 0.78rem; font-weight: 700; color: #475569; margin-bottom: 5px;">First Name</label>
+                    <input type="text" id="seniorEditFirstName" placeholder="First name" style="width: 100%; padding: 10px 12px; border: 1.5px solid #e2e8f0; border-radius: 8px; font-size: 0.9rem; box-sizing: border-box;">
+                </div>
+                <div>
+                    <label style="display: block; font-size: 0.78rem; font-weight: 700; color: #475569; margin-bottom: 5px;">Last Name</label>
+                    <input type="text" id="seniorEditLastName" placeholder="Last name" style="width: 100%; padding: 10px 12px; border: 1.5px solid #e2e8f0; border-radius: 8px; font-size: 0.9rem; box-sizing: border-box;">
+                </div>
+                <div>
+                    <label style="display: block; font-size: 0.78rem; font-weight: 700; color: #475569; margin-bottom: 5px;">Middle Name</label>
+                    <input type="text" id="seniorEditMiddleName" placeholder="Middle name" style="width: 100%; padding: 10px 12px; border: 1.5px solid #e2e8f0; border-radius: 8px; font-size: 0.9rem; box-sizing: border-box;">
+                </div>
+                <div>
+                    <label style="display: block; font-size: 0.78rem; font-weight: 700; color: #475569; margin-bottom: 5px;">Extension (Jr/Sr/III)</label>
+                    <input type="text" id="seniorEditExtension" placeholder="e.g. Jr" style="width: 100%; padding: 10px 12px; border: 1.5px solid #e2e8f0; border-radius: 8px; font-size: 0.9rem; box-sizing: border-box;">
+                </div>
+                <div>
+                    <label style="display: block; font-size: 0.78rem; font-weight: 700; color: #475569; margin-bottom: 5px;">Senior Citizen ID *</label>
+                    <input type="text" id="seniorEditSeniorId" placeholder="Senior Citizen ID" style="width: 100%; padding: 10px 12px; border: 1.5px solid #e2e8f0; border-radius: 8px; font-size: 0.9rem; box-sizing: border-box;">
+                </div>
+                <div>
+                    <label style="display: block; font-size: 0.78rem; font-weight: 700; color: #475569; margin-bottom: 5px;">Email (read-only)</label>
+                    <input type="email" id="seniorEditEmail" readonly style="width: 100%; padding: 10px 12px; border: 1.5px solid #e2e8f0; border-radius: 8px; font-size: 0.9rem; box-sizing: border-box; background: #f8fafc; color: #64748b;">
+                </div>
+                <div>
+                    <label style="display: block; font-size: 0.78rem; font-weight: 700; color: #475569; margin-bottom: 5px;">Contact Number</label>
+                    <input type="text" id="seniorEditCp" placeholder="09xxxxxxxxx" style="width: 100%; padding: 10px 12px; border: 1.5px solid #e2e8f0; border-radius: 8px; font-size: 0.9rem; box-sizing: border-box;">
+                </div>
+                <div>
+                    <label style="display: block; font-size: 0.78rem; font-weight: 700; color: #475569; margin-bottom: 5px;">Date of Birth</label>
+                    <input type="date" id="seniorEditDob" style="width: 100%; padding: 10px 12px; border: 1.5px solid #e2e8f0; border-radius: 8px; font-size: 0.9rem; box-sizing: border-box;">
+                </div>
+                <div>
+                    <label style="display: block; font-size: 0.78rem; font-weight: 700; color: #475569; margin-bottom: 5px;">Sex</label>
+                    <select id="seniorEditSex" style="width: 100%; padding: 10px 12px; border: 1.5px solid #e2e8f0; border-radius: 8px; font-size: 0.9rem; box-sizing: border-box; background: white;">
+                        <option value="">Select</option>
+                        <option value="Male">Male</option>
+                        <option value="Female">Female</option>
+                    </select>
+                </div>
+                <div>
+                    <label style="display: block; font-size: 0.78rem; font-weight: 700; color: #475569; margin-bottom: 5px;">Civil Status</label>
+                    <select id="seniorEditCivil" style="width: 100%; padding: 10px 12px; border: 1.5px solid #e2e8f0; border-radius: 8px; font-size: 0.9rem; box-sizing: border-box; background: white;">
+                        <option value="">Select</option>
+                        <option>Single</option>
+                        <option>Married</option>
+                        <option>Widowed</option>
+                        <option>Separated</option>
+                        <option>Divorced</option>
+                    </select>
+                </div>
+                <div style="grid-column: span 2;">
+                    <label style="display: block; font-size: 0.78rem; font-weight: 700; color: #475569; margin-bottom: 5px;">Address</label>
+                    <input type="text" id="seniorEditAddress" placeholder="Street / house address" style="width: 100%; padding: 10px 12px; border: 1.5px solid #e2e8f0; border-radius: 8px; font-size: 0.9rem; box-sizing: border-box;">
+                </div>
+                <div>
+                    <label style="display: block; font-size: 0.78rem; font-weight: 700; color: #475569; margin-bottom: 5px;">Barangay</label>
+                    <input type="text" id="seniorEditBarangay" placeholder="Barangay" style="width: 100%; padding: 10px 12px; border: 1.5px solid #e2e8f0; border-radius: 8px; font-size: 0.9rem; box-sizing: border-box;">
+                </div>
+                <div>
+                    <label style="display: block; font-size: 0.78rem; font-weight: 700; color: #475569; margin-bottom: 5px;">City</label>
+                    <input type="text" id="seniorEditCity" placeholder="City" style="width: 100%; padding: 10px 12px; border: 1.5px solid #e2e8f0; border-radius: 8px; font-size: 0.9rem; box-sizing: border-box;">
+                </div>
+                <div>
+                    <label style="display: block; font-size: 0.78rem; font-weight: 700; color: #475569; margin-bottom: 5px;">Province</label>
+                    <input type="text" id="seniorEditProvince" placeholder="Province" style="width: 100%; padding: 10px 12px; border: 1.5px solid #e2e8f0; border-radius: 8px; font-size: 0.9rem; box-sizing: border-box;">
+                </div>
+                <div>
+                    <label style="display: block; font-size: 0.78rem; font-weight: 700; color: #475569; margin-bottom: 5px;">Postal Code</label>
+                    <input type="text" id="seniorEditPostal" placeholder="Postal code" style="width: 100%; padding: 10px 12px; border: 1.5px solid #e2e8f0; border-radius: 8px; font-size: 0.9rem; box-sizing: border-box;">
+                </div>
+            </div>
+            <div id="seniorEditNotice" style="display: none; margin-top: 16px; border-radius: 8px; padding: 11px 14px; font-size: 0.82rem; line-height: 1.5;"></div>
+            <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px; border-top: 1px solid #f1f5f9; padding-top: 16px; flex-wrap: wrap;">
+                <button type="button" id="seniorEditDeceasedBtn" onclick="window.markSeniorDeceased()" title="Mark this senior as Deceased — the account moves to the Archive and stops receiving pension" style="border: 1px solid #475569; background: #475569; color: white; font-weight: 700; padding: 10px 20px; border-radius: 8px; cursor: pointer; font-size: 0.85rem; margin-right: auto;"><i class="fas fa-book-dead" style="margin-right: 6px;"></i>Deceased</button>
+                <button type="button" onclick="window.closeManageSeniorsEditor()" style="border: 1px solid #cbd5e1; background: white; color: #475569; font-weight: 700; padding: 10px 20px; border-radius: 8px; cursor: pointer; font-size: 0.85rem;">Cancel</button>
+                <button type="button" id="seniorEditSaveBtn" onclick="window.saveManageSeniorsEdits()" style="border: none; background: #2563eb; color: white; font-weight: 700; padding: 10px 24px; border-radius: 8px; cursor: pointer; font-size: 0.85rem;">Save Changes</button>
+            </div>
+        </div>
+    </div>
+
     <div id="claimDetailsModal" style="display: none; position: fixed; inset: 0; background: rgba(15,23,42,0.6); backdrop-filter: blur(4px); z-index: 9999; justify-content: center; align-items: center; padding: 20px;">
         <div style="background: white; border-radius: 16px; max-width: 600px; width: 100%; max-height: 80vh; overflow-y: auto; padding: 30px; box-shadow: 0 20px 25px -5px rgba(0,0,0,0.1); border: 1px solid #e2e8f0; display: flex; flex-direction: column; gap: 20px;">
             <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #f1f5f9; padding-bottom: 15px;">
@@ -1360,7 +1560,8 @@
                 <button id="modalRejectBtn" class="btn" style="background: #ef4444; color: white; border-radius: 6px; padding: 10px 20px; font-weight: 600; cursor: pointer; border: none;">Reject Claim</button>
             </div>
         </div>
-    </div>    <script>
+    </div>
+    <script>
         window.openSelectUserModal = function() {
             // Check if there is a message first
             const msg = document.getElementById('reminderMessage').value.trim();
@@ -1434,11 +1635,46 @@
             </div>
         </div>
     </div>
-
-    <!-- Health Report Review Modal — illness assessment + priority level (OSCA staff) -->
-    <div id="healthReviewModal" style="display: none; position: fixed; inset: 0; background: rgba(15,23,42,0.65); backdrop-filter: blur(4px); z-index: 99998; justify-content: center; align-items: center; padding: 18px;">
-        <div style="background: white; border-radius: 10px; width: 100%; max-width: 1100px; max-height: 92vh; border: 1px solid #cbd5e1; display: flex; flex-direction: column; overflow: hidden;">
-
+    <!-- Comprehensive Report Modal (Process Benefits: PDF / Excel) -->
+    <div id="pbReportModal" style="display:none; position:fixed; inset:0; background:rgba(15,23,42,0.6); z-index:99997; justify-content:center; align-items:center; padding:20px;">
+        <div style="background:#ffffff; border-radius:14px; width:100%; max-width:560px; max-height:92vh; overflow-y:auto; border:1px solid #e2e8f0;">
+            <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:14px; padding:20px 24px 14px; border-bottom:2px solid #1e293b;">
+                <div>
+                    <h3 style="margin:0; color:#1e293b; font-size:1.1rem; font-weight:700;">Comprehensive Report</h3>
+                    <p style="margin:6px 0 0; color:#64748b; font-size:0.82rem;">Automated report exported to PDF or Excel, built from live records.</p>
+                </div>
+                <span onclick="window.closePbReportModal()" style="font-size:1.8rem; color:#94a3b8; cursor:pointer; font-weight:bold; line-height:1;">&times;</span>
+            </div>
+            <div style="padding:18px 24px;">
+                <p style="margin:0 0 10px; font-size:0.8rem; font-weight:700; color:#475569;">INCLUDED SECTIONS</p>
+                <label style="display:flex; gap:10px; padding:10px 12px; border:1px solid #e2e8f0; border-radius:8px; margin-bottom:8px; cursor:pointer;">
+                    <input type="checkbox" id="pbRepSecPopulation" checked style="margin-top:3px;">
+                    <span style="font-size:0.85rem; color:#1e293b;"><strong>Senior citizen population</strong><br><span style="color:#64748b;">Per barangay, status, and sex.</span></span>
+                </label>
+                <label style="display:flex; gap:10px; padding:10px 12px; border:1px solid #e2e8f0; border-radius:8px; margin-bottom:8px; cursor:pointer;">
+                    <input type="checkbox" id="pbRepSecBenefits" checked style="margin-top:3px;">
+                    <span style="font-size:0.85rem; color:#1e293b;"><strong>Pension and assistance distribution</strong><br><span style="color:#64748b;">Totals plus per-senior rows.</span></span>
+                </label>
+                <label style="display:flex; gap:10px; padding:10px 12px; border:1px solid #e2e8f0; border-radius:8px; margin-bottom:8px; cursor:pointer;">
+                    <input type="checkbox" id="pbRepSecHealth" checked style="margin-top:3px;">
+                    <span style="font-size:0.85rem; color:#1e293b;"><strong>Health status and high-risk cases</strong><br><span style="color:#64748b;">Condition, priority, visit compliance.</span></span>
+                </label>
+                <label style="display:flex; gap:10px; padding:10px 12px; border:1px solid #e2e8f0; border-radius:8px; margin-bottom:12px; cursor:pointer;">
+                    <input type="checkbox" id="pbRepSecPending" checked style="margin-top:3px;">
+                    <span style="font-size:0.85rem; color:#1e293b;"><strong>Pending applications and compliance</strong><br><span style="color:#64748b;">KYC, pension setup, claims, appointments.</span></span>
+                </label>
+                <p id="pbReportModalNote" style="display:none; margin:0 0 12px; font-size:0.8rem; color:#b45309;">Select at least one section.</p>
+                <div style="display:flex; gap:10px; flex-wrap:wrap; justify-content:flex-end; border-top:1px solid #f1f5f9; padding-top:16px;">
+                    <button type="button" onclick="window.closePbReportModal()" style="border:1px solid #cbd5e1; background:#fff; color:#475569; font-weight:700; padding:10px 18px; border-radius:8px; cursor:pointer;">Cancel</button>
+                    <button type="button" onclick="window.generatePbReportFile('excel')" style="border:none; background:#15803d; color:#fff; font-weight:700; padding:10px 18px; border-radius:8px; cursor:pointer;">Download Excel</button>
+                    <button type="button" onclick="window.generatePbReportFile('pdf')" style="border:none; background:#1e293b; color:#fff; font-weight:700; padding:10px 18px; border-radius:8px; cursor:pointer;">Download PDF</button>
+                </div>
+            </div>
+        </div>
+    </div>
+    <!-- Health Report Review Modal -->
+    <div id="healthReviewModal" style="display:none; position:fixed; inset:0; background:rgba(15,23,42,0.65); z-index:99998; justify-content:center; align-items:center; padding:18px;">
+        <div style="background:#ffffff; border-radius:10px; width:100%; max-width:1100px; max-height:92vh; border:1px solid #cbd5e1; display:flex; flex-direction:column; overflow:hidden;">
             <!-- Header -->
             <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 14px; padding: 18px 24px; border-bottom: 2px solid #1e293b; flex-wrap: wrap;">
                 <div style="min-width: 0;">
@@ -1556,6 +1792,8 @@
     <script type="module" src="/js/main.js"></script>
     <script type="module" src="/js/employee.js"></script>
     <script src="/js/process-benefits-board.js"></script>
+    <script src="/js/pb-comprehensive-report.js"></script>
+    <script type="module" src="/js/manage-seniors.js"></script>
     <script>
         function switchEmpTab(tabId, element) {
             // Release the QR scanner camera when leaving the Verify tab
@@ -1587,6 +1825,9 @@
             }
             if (tabId === 'notifications' && window.renderEmployeeNotifications) {
                 window.renderEmployeeNotifications();
+            }
+            if (tabId === 'seniors' && window.renderManageSeniors) {
+                window.renderManageSeniors();
             }
             if (tabId === 'archive' && window.loadReactivationRequests) {
                 window.loadReactivationRequests();
