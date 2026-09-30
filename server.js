@@ -4409,7 +4409,13 @@ app.get('/api/benefits/:benefitId/requirements', requireAuth, requireRole('admin
 // ============================================================
 // ARCHIVE FUNCTION — Automatic Daily Backup & Data Recovery Plan
 // ------------------------------------------------------------
-// Every 24 hours the full Realtime Database is exported.
+// Every 24 hours the database is exported NODE BY NODE (never as one giant
+// ref('/') payload) and the `system/backups` subtree is EXCLUDED — the old
+// implementation exported the whole database, including its own previous
+// snapshots, back into system/backups/snapshots, so the archive doubled
+// every day until root reads failed with "The specified payload is too
+// large". In-database snapshots are pruned to BACKUP_RETENTION_DAYS via the
+// tiny metadata index at system/backups/index.
 // ON RAILWAY (or any host with an ephemeral filesystem) the snapshot is
 // stored durably in Firebase itself at system/backups/snapshots/<fileName>
 // and mirrored to system/backups/lastBackup so the Employee dashboard
@@ -4426,6 +4432,27 @@ const ARCHIVED_RECORD_STATUSES = ['Inactive', 'Deceased', 'Transferred', 'Archiv
 // RAILWAY_ENVIRONMENT, so use that to detect it.
 const IS_EPHEMERAL_FS = Boolean(process.env.RAILWAY_ENVIRONMENT || process.env.RAILWAY_PUBLIC_DOMAIN);
 
+// Top nodes used when the shallow REST listing is unavailable (older Node
+// without global fetch). Mirrors the live schema; unknown NEW nodes are
+// still picked up automatically whenever shallow listing works.
+const BACKUP_FALLBACK_TOP_NODES = ['users', 'auditLogs', 'claims', 'transactions', 'queue',
+    'healthCenters', 'pensionSettings', 'notifications', 'appointments', 'appointmentRequests',
+    'checkups', 'benefits', 'pensions', 'doctors', 'barangays', 'qrCodes', 'budget',
+    'medicationRequests', 'reactivationRequests', 'attendance', 'idDocuments', 'records'];
+
+// Shallow (keys-only) REST read — the Admin SDK cannot list children without
+// downloading their payloads, and this database must never again be read as
+// one giant payload.
+async function shallowChildKeys(path) {
+    const base = String(admin.app().options.databaseURL || '').replace(/\/+$/, '');
+    if (!base || typeof fetch !== 'function') throw new Error('shallow read unavailable');
+    const { access_token } = await admin.app().options.credential.getAccessToken();
+    const clean = String(path || '').replace(/^\/+|\/+$/g, '');
+    const res = await fetch(`${base}/${clean}.json?shallow=true&access_token=${encodeURIComponent(access_token)}`);
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    return Object.keys((await res.json()) || {});
+}
+
 function listBackupFiles() {
     if (!fs.existsSync(BACKUP_DIR)) return [];
     return fs.readdirSync(BACKUP_DIR)
@@ -4436,9 +4463,41 @@ function listBackupFiles() {
 async function runDatabaseBackup(trigger = 'automatic') {
     const startedAt = Date.now();
 
-    // Full export of every node (single source of truth snapshot)
-    const snap = await admin.database().ref('/').once('value');
-    const data = snap.val() || {};
+    // Export NODE BY NODE — never ref('/') (see comment above). The
+    // `system/backups` subtree is skipped so snapshots can never nest inside
+    // snapshots again. A node that fails to read is recorded as skipped
+    // instead of failing the whole export.
+    const data = {};
+    const skipped = [];
+    let topNodes;
+    try {
+        topNodes = await shallowChildKeys('');
+    } catch (e) {
+        console.warn('[Backup] shallow root listing unavailable, using fallback node list:', e.message);
+        topNodes = BACKUP_FALLBACK_TOP_NODES;
+    }
+    for (const node of topNodes) {
+        if (node === 'system') {
+            let systemKeys;
+            try { systemKeys = await shallowChildKeys('system'); }
+            catch (e) { systemKeys = ['settings', 'healthConsentDefaults']; }
+            for (const key of systemKeys) {
+                if (key === 'backups') continue; // NEVER back up the backups
+                try {
+                    const s = await admin.database().ref(`system/${key}`).once('value');
+                    if (s.exists()) { data.system = data.system || {}; data.system[key] = s.val(); }
+                } catch (e) { skipped.push(`system/${key}`); }
+            }
+            continue;
+        }
+        try {
+            const s = await admin.database().ref(node).once('value');
+            if (s.exists()) data[node] = s.val();
+        } catch (e) {
+            skipped.push(node);
+            console.warn(`[Backup] node "${node}" could not be exported:`, e.message);
+        }
+    }
     const users = data.users || {};
     const seniorList = Object.values(users).filter(u => u && u.role === 'senior');
     const archivedSeniors = seniorList.filter(u => ARCHIVED_RECORD_STATUSES.includes(String(u.lifeStatus || u.status || 'Active'))).length;
@@ -4458,7 +4517,8 @@ async function runDatabaseBackup(trigger = 'automatic') {
             createdAt: new Date(startedAt).toISOString(),
             trigger: trigger,
             retentionDays: BACKUP_RETENTION_DAYS,
-            counts: counts
+            counts: counts,
+            skipped: skipped
         },
         data: data
     });
@@ -4481,6 +4541,26 @@ async function runDatabaseBackup(trigger = 'automatic') {
     for (let i = 0; i < chunks.length; i++) {
         await snapshotRef.child(`chunks/${i}`).set(chunks[i]);
     }
+
+    // Small metadata index (system/backups/index) — the only thing retention
+    // ever lists, so pruning never downloads snapshot chunks.
+    const snapshotId = fileName.replace(/\.json$/, '');
+    await admin.database().ref(`system/backups/index/${snapshotId}`).set({
+        file: fileName, createdAt: startedAt, trigger: trigger,
+        sizeBytes: sizeBytes, chunkCount: chunks.length
+    });
+
+    // Prune old in-database snapshots (same 30-snapshot policy as local disk).
+    try {
+        const idxSnap = await admin.database().ref('system/backups/index').once('value');
+        const ids = Object.keys(idxSnap.val() || {}).sort(); // names embed a sortable ISO timestamp
+        const excess = ids.slice(0, Math.max(0, ids.length - BACKUP_RETENTION_DAYS));
+        for (const id of excess) {
+            await admin.database().ref(`system/backups/snapshots/${id}`).remove();
+            await admin.database().ref(`system/backups/index/${id}`).remove();
+        }
+        if (excess.length) console.log(`[Backup] pruned ${excess.length} old snapshot(s).`);
+    } catch (e) { console.warn('[Backup] snapshot retention skipped:', e.message); }
 
     // 2) Local disk copy (persistent locally; best-effort on ephemeral hosts)
     if (!IS_EPHEMERAL_FS) {
