@@ -307,10 +307,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
                         try {
                             const token = await withTimeout(user.getIdToken(), 20000, 'Session token');
+                            // 45s budget: the server's own ops are capped at ~39s worst case
+                            // (token verify 10s + profile read 10s + e-mail 15s + audit 4s), so this
+                            // client must outlive that — otherwise a slow mail provider/DB shows a
+                            // false "timed out" even though the code e-mail was actually sent.
                             const startRes = await fetchWithTimeout('/api/2fa/start', {
                                 method: 'POST',
                                 headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token }
-                            }, 25000);
+                            }, 45000);
                             const startData = await startRes.json().catch(() => ({}));
 
                             if (!startRes.ok && startRes.status !== 429) {
@@ -348,7 +352,7 @@ document.addEventListener('DOMContentLoaded', () => {
                             const rawStartMsg = String((err && err.message) || '') + ' ' + String(err.code || '');
                             const startTimedOut = /timed out after|AbortError|aborted/i.test(rawStartMsg);
                             scNotify('error', startTimedOut
-                                ? 'The security-code email timed out. Check your connection (and that /api/email-status shows Ready), then try again. (' + (err.message || err.code || 'timeout') + ')'
+                                ? 'The security-code email timed out. If the code e-mail already arrived, sign in again to enter it. Otherwise check your connection (and that /api/email-status shows Ready), then try again. (' + (err.message || err.code || 'timeout') + ')'
                                 : 'Failed to start two-factor authentication. Please try again.', '2FA Required');
                             btn.innerHTML = originalText;
                             btn.disabled = false;
@@ -449,7 +453,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
                     body: JSON.stringify({ code })
-                }, 25000);
+                }, 30000);
                 const data = await res.json().catch(() => ({}));
                 if (data.success) {
                     // OTP accepted — unlock the dashboard for this tab
@@ -493,7 +497,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 const res = await fetchWithTimeout('/api/2fa/start', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token }
-                }, 25000);
+                }, 45000);
                 const data = await res.json().catch(() => ({}));
                 if (data.success) {
                     scNotify('success', data.message || 'A new security code was sent to your email.', 'Code Sent');

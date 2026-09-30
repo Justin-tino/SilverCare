@@ -204,7 +204,7 @@ async function sendEmail({ to, subject, html }) {
     // --- Brevo HTTPS API (recommended for Railway free) ---
     if (process.env.BREVO_API_KEY) {
         const ctrl = new AbortController();
-        const t = setTimeout(() => ctrl.abort(), 20000);
+        const t = setTimeout(() => ctrl.abort(), 15000);
         try {
             const resp = await fetch('https://api.brevo.com/v3/smtp/email', {
                 method: 'POST',
@@ -228,7 +228,7 @@ async function sendEmail({ to, subject, html }) {
             }
             return data;
         } catch (e) {
-            if (e && e.name === 'AbortError') throw new Error('Email provider timed out (20s). Please try again.');
+            if (e && e.name === 'AbortError') throw new Error('Email provider timed out (15s). Please try again.');
             throw e;
         } finally {
             clearTimeout(t);
@@ -238,7 +238,7 @@ async function sendEmail({ to, subject, html }) {
     // --- Resend HTTPS API (alternative) ---
     if (process.env.RESEND_API_KEY) {
         const ctrl = new AbortController();
-        const t = setTimeout(() => ctrl.abort(), 20000);
+        const t = setTimeout(() => ctrl.abort(), 15000);
         try {
             const resp = await fetch('https://api.resend.com/emails', {
                 method: 'POST',
@@ -260,7 +260,7 @@ async function sendEmail({ to, subject, html }) {
             }
             return data;
         } catch (e) {
-            if (e && e.name === 'AbortError') throw new Error('Email provider timed out (20s). Please try again.');
+            if (e && e.name === 'AbortError') throw new Error('Email provider timed out (15s). Please try again.');
             throw e;
         } finally {
             clearTimeout(t);
@@ -488,6 +488,31 @@ async function notifySeniorSms(uid, type, extra) {
     }
 }
 
+// --- Server-side operation timeouts ---
+// The Firebase Admin SDK's RTDB/Auth calls and outbound HTTP requests have NO
+// default timeout. A slow or unreachable backend kept the request — and every
+// client awaiting it — pending for minutes (e.g. staff login stuck on
+// "Authenticating..." because the 2FA audit write never settled). Every network
+// operation on a request's critical path is now hard-capped so the server
+// ALWAYS answers within a bounded time.
+function withServerTimeout(promise, ms, label) {
+    let timer = null;
+    const timeout = new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error((label || 'Operation') + ' timed out after ' + ms + 'ms.')), ms);
+    });
+    // Swallow late rejections of the abandoned operation so a timed-out promise
+    // can never surface as an unhandled rejection (which crashes Node 15+).
+    promise.catch(() => {});
+    return Promise.race([promise, timeout]).finally(() => { if (timer) clearTimeout(timer); });
+}
+
+// Budgets chosen so the worst case (token verify + profile read + e-mail
+// provider + audit write) stays below the browser's 45s patience on /api/2fa/start:
+// 10s + 10s + 15s + 4s = 39s.
+const AUTH_VERIFY_TIMEOUT_MS = 10000;  // Google ID-token verification
+const AUTH_PROFILE_TIMEOUT_MS = 10000; // users/{uid} read
+const AUDIT_LOG_TIMEOUT_MS = 4000;     // auditLogs push (must never stall a response)
+
 // --- Security: Auth Middleware ---
 async function requireAuth(req, res, next) {
     const authHeader = req.headers.authorization;
@@ -496,14 +521,21 @@ async function requireAuth(req, res, next) {
     }
     try {
         const idToken = authHeader.split('Bearer ')[1];
-        const decoded = await admin.auth().verifyIdToken(idToken);
-        const userSnap = await admin.database().ref(`users/${decoded.uid}`).once('value');
+        const decoded = await withServerTimeout(admin.auth().verifyIdToken(idToken), AUTH_VERIFY_TIMEOUT_MS, 'Token verification');
+        const userSnap = await withServerTimeout(admin.database().ref(`users/${decoded.uid}`).once('value'), AUTH_PROFILE_TIMEOUT_MS, 'User profile read');
         if (!userSnap.exists()) {
             return res.status(403).json({ success: false, message: 'User profile not found.' });
         }
         req.authUser = { uid: decoded.uid, ...userSnap.val() };
         next();
     } catch (error) {
+        // A hung backend is NOT a credential problem — report it as such
+        // instead of the misleading "Invalid or expired token" (which used to
+        // leave users re-typing correct passwords).
+        if (/timed out after/.test(String((error && error.message) || ''))) {
+            console.error('requireAuth backend timeout:', error.message);
+            return res.status(503).json({ success: false, message: 'Authentication service is temporarily unavailable. Please try again in a moment.' });
+        }
         return res.status(401).json({ success: false, message: 'Invalid or expired token.' });
     }
 }
@@ -1927,7 +1959,9 @@ app.get('/api/priority/:uid', requireAuth, async (req, res) => {
 
 async function writeAuditLog(action, actor, targetUid, docId, detail) {
     try {
-        await admin.database().ref('auditLogs').push({
+        // Bounded: a slow/unreachable RTDB must never delay the HTTP response
+        // it is attached to (2FA, login, status updates...).
+        await withServerTimeout(admin.database().ref('auditLogs').push({
             action: action,
             actorUid: actor.uid,
             actorRole: actor.role,
@@ -1936,7 +1970,7 @@ async function writeAuditLog(action, actor, targetUid, docId, detail) {
             docId: docId || null,
             detail: detail || null,
             timestamp: Date.now()
-        });
+        }), AUDIT_LOG_TIMEOUT_MS, 'Audit log write');
     } catch (e) {
         console.error('Audit log write failed:', e.message);
     }
