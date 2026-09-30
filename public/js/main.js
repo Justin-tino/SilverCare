@@ -22,6 +22,25 @@ function isOtpExemptEmail(email) {
     return OTP_EXEMPT_EMAILS.has(String(email || '').trim().toLowerCase());
 }
 
+// Never leave the UI on "Authenticating..." forever: any await that never
+// settles (blocked RTDB websocket, hung SMTP, stalled fetch) is converted
+// into a catchable error after `ms` so the button restores and the user
+// sees a message instead of an infinite spinner.
+function withTimeout(promise, ms, label) {
+    let timer = null;
+    const timeout = new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error((label || 'Request') + ' timed out after ' + ms + 'ms.')), ms);
+    });
+    return Promise.race([promise, timeout]).finally(() => { if (timer) clearTimeout(timer); });
+}
+
+function fetchWithTimeout(url, options, ms) {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), ms || 25000);
+    const opts = Object.assign({}, options || {}, { signal: ctrl.signal });
+    return fetch(url, opts).finally(() => clearTimeout(timer));
+}
+
 const ROLE_UI = {
     admin:    { title: 'Admin Login', icon: 'fas fa-shield-alt', iconColor: '#3b82f6', buttonBg: '#3b82f6' },
     employee: { title: 'OSCA Login',  icon: 'fas fa-users-cog',  iconColor: '#4a5568', buttonBg: '#4a5568' }
@@ -142,7 +161,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         try {
-            const userSnap = await get(ref(db, 'users/' + user.uid));
+            const userSnap = await withTimeout(get(ref(db, 'users/' + user.uid)), 20000, 'Profile lookup');
             if (userSnap.exists()) {
                 const snapData = userSnap.val() || {};
                 // Deceased gate (Archive Function): a senior marked Deceased must
@@ -193,13 +212,15 @@ document.addEventListener('DOMContentLoaded', () => {
 
             try {
                 // Standard Login for all users
-                const userCredential = await signInWithEmailAndPassword(auth, email, password);
+                const userCredential = await withTimeout(signInWithEmailAndPassword(auth, email, password), 25000, 'Sign-in');
 
                 const user = userCredential.user;
 
-                // Check Database Role and Status
+                // Check Database Role and Status (bounded: a blocked RTDB
+                // websocket must time out into the catch below, never hang
+                // the "Authenticating..." button forever).
                 const userRef = ref(db, 'users/' + user.uid);
-                const snapshot = await get(userRef);
+                const snapshot = await withTimeout(get(userRef), 20000, 'Profile lookup');
                 
                 if (snapshot.exists()) {
                     const userData = snapshot.val();
@@ -247,9 +268,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
                     localStorage.setItem('userRole', userData.role);
                     
-                    // Check maintenance mode for non-admins
+                    // Check maintenance mode for non-admins (bounded — same hang guard)
                     if (userData.role !== 'admin') {
-                        const maintenanceSnap = await get(ref(db, 'system/settings/maintenanceMode'));
+                        const maintenanceSnap = await withTimeout(get(ref(db, 'system/settings/maintenanceMode')), 15000, 'Maintenance check');
                         if (maintenanceSnap.exists() && maintenanceSnap.val() === true) {
                             await auth.signOut();
                             localStorage.removeItem('userRole');
@@ -285,11 +306,11 @@ document.addEventListener('DOMContentLoaded', () => {
                         clearPending2FA();
 
                         try {
-                            const token = await user.getIdToken();
-                            const startRes = await fetch('/api/2fa/start', {
+                            const token = await withTimeout(user.getIdToken(), 20000, 'Session token');
+                            const startRes = await fetchWithTimeout('/api/2fa/start', {
                                 method: 'POST',
                                 headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token }
-                            });
+                            }, 25000);
                             const startData = await startRes.json().catch(() => ({}));
 
                             if (!startRes.ok && startRes.status !== 429) {
@@ -324,7 +345,11 @@ document.addEventListener('DOMContentLoaded', () => {
                             console.error('2FA start error:', err);
                             await auth.signOut();
                             localStorage.removeItem('userRole');
-                            scNotify('error', 'Failed to start two-factor authentication. Please try again.', '2FA Required');
+                            const rawStartMsg = String((err && err.message) || '') + ' ' + String(err.code || '');
+                            const startTimedOut = /timed out after|AbortError|aborted/i.test(rawStartMsg);
+                            scNotify('error', startTimedOut
+                                ? 'The security-code email timed out. Check your connection (and that /api/email-status shows Ready), then try again. (' + (err.message || err.code || 'timeout') + ')'
+                                : 'Failed to start two-factor authentication. Please try again.', '2FA Required');
                             btn.innerHTML = originalText;
                             btn.disabled = false;
                             return;
@@ -353,8 +378,10 @@ document.addEventListener('DOMContentLoaded', () => {
             } catch (error) {
                 console.error("Login error:", error);
                 let friendlyMessage = 'An unexpected error occurred. Please try again. (' + (error.code || error.message || 'Unknown error') + ')';
-                
-                if (error.code === 'auth/invalid-credential' || error.code === 'auth/wrong-password' || error.code === 'auth/invalid-login-credentials') {
+                const rawMsg = String((error && error.message) || '') + ' ' + String(error.code || '');
+                if (/timed out after|AbortError|aborted/i.test(rawMsg)) {
+                    friendlyMessage = 'The request timed out (network or database is slow/blocked). Check your connection, disable ad-blocker/Brave Shields for this site, then try again. (' + (error.message || error.code || 'timeout') + ')';
+                } else if (error.code === 'auth/invalid-credential' || error.code === 'auth/wrong-password' || error.code === 'auth/invalid-login-credentials') {
                     friendlyMessage = 'Invalid email or password. Please check your credentials and try again.';
                 } else if (error.code === 'auth/user-not-found') {
                     friendlyMessage = 'No account found with this email. Please sign up first.';
@@ -417,12 +444,12 @@ document.addEventListener('DOMContentLoaded', () => {
             verifyBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Verifying...';
             verifyBtn.disabled = true;
             try {
-                const token = await auth.currentUser.getIdToken();
-                const res = await fetch('/api/2fa/verify', {
+                const token = await withTimeout(auth.currentUser.getIdToken(), 20000, 'Session token');
+                const res = await fetchWithTimeout('/api/2fa/verify', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
                     body: JSON.stringify({ code })
-                });
+                }, 25000);
                 const data = await res.json().catch(() => ({}));
                 if (data.success) {
                     // OTP accepted — unlock the dashboard for this tab
@@ -442,7 +469,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
             } catch (err) {
                 console.error('2FA verify error:', err);
-                scNotify('error', 'Verification failed. Please try again.', 'Verification Failed');
+                const rawVerifyMsg = String((err && err.message) || '') + ' ' + String(err.code || '');
+                const verifyTimedOut = /timed out after|AbortError|aborted/i.test(rawVerifyMsg);
+                scNotify('error', verifyTimedOut
+                    ? 'Verification timed out. Check your connection, then re-enter the code or resend it. (' + (err.message || err.code || 'timeout') + ')'
+                    : 'Verification failed. Please try again.', 'Verification Failed');
                 verifyBtn.innerHTML = originalText;
                 verifyBtn.disabled = false;
             }
@@ -458,11 +489,11 @@ document.addEventListener('DOMContentLoaded', () => {
             const currentUser = auth.currentUser;
             if (!pending || !currentUser) return;
             try {
-                const token = await currentUser.getIdToken();
-                const res = await fetch('/api/2fa/start', {
+                const token = await withTimeout(currentUser.getIdToken(), 20000, 'Session token');
+                const res = await fetchWithTimeout('/api/2fa/start', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token }
-                });
+                }, 25000);
                 const data = await res.json().catch(() => ({}));
                 if (data.success) {
                     scNotify('success', data.message || 'A new security code was sent to your email.', 'Code Sent');

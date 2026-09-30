@@ -6,7 +6,7 @@
  *   1. Credentials present in .env
  *   2. Project reachable with the service-role key
  *   3. "seniors" table exists (mirrored senior data)
- *   4. Private buckets "seniors" (folder per senior) + "senior-ids"
+ *   4. Private bucket "photos" ({ID-number}/face.jpg layout)
  *
  * Usage:  node scripts/check-supabase.js
  * ---------------------------------------------------------------
@@ -65,9 +65,9 @@ async function main() {
     }
     console.log(`✓  Table "seniors" ready (${count || 0} senior record${(count || 0) === 1 ? '' : 's'} mirrored so far)`);
 
-    // 4) Buckets
+    // 4) Buckets — single image bucket "photos" (+ legacy read sources)
     const { data: buckets } = await supabase.storage.listBuckets();
-    for (const name of ['seniors', 'senior-ids', 'medical-certifications']) {
+    for (const name of ['photos', 'seniors', 'senior-ids', 'medical-certifications']) {
         const bucket = (buckets || []).find(b => b.name === name);
         if (!bucket) {
             console.warn(`⚠  Bucket "${name}" does not exist yet — it is created automatically on first use.`);
