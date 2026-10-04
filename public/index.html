@@ -81,6 +81,62 @@
             </form>
         </div>
 
+        <!-- Data Privacy Notice Screen (Senior Citizen — shown before login) -->
+        <div id="privacyContainer" class="glass-container login-card" style="display: none; background: white; margin-top: 20px; max-width: 760px; text-align: left;">
+            <button type="button" id="privacyBackBtn" style="background:none; border:none; color:#718096; cursor:pointer; margin-bottom:20px;">
+                <i class="fas fa-arrow-left"></i> Back to role selection
+            </button>
+
+            <div style="text-align: center; margin-bottom: 20px;">
+                <i class="fas fa-shield-halved" style="font-size: 3rem; color: #22c55e; margin-bottom: 10px;"></i>
+                <h3 style="margin-bottom: 4px; letter-spacing: 1px;">SILVERCARE</h3>
+                <h4 style="margin: 0 0 6px; font-weight: 700;">Data Privacy Notice and Consent</h4>
+                <p style="color: #718096; font-size: 0.85rem; margin: 0;">In accordance with Republic Act No. 10173 — Data Privacy Act of 2012</p>
+            </div>
+
+            <div class="privacy-scroll" style="max-height: 320px; overflow-y: auto; padding: 18px 20px; border: 1px solid #e2e8f0; border-radius: 10px; background: #f8fafc; font-size: 0.88rem; color: #334155; line-height: 1.6;">
+                <p style="margin: 0 0 12px;">SilverCare is a web-based senior citizen records, benefit monitoring, and priority assistance management system developed for the Office of the Senior Citizens Affairs (OSCA) of Magalang. This Privacy Notice is provided in accordance with Republic Act No. 10173, otherwise known as the Data Privacy Act of 2012, and its Implementing Rules and Regulations.</p>
+
+                <h5 style="margin: 16px 0 6px; font-size: 0.92rem; color: #0f172a;">1. Collection of Personal Information</h5>
+                <p style="margin: 0 0 12px;">SilverCare may collect and process personal information, including full name, date of birth, address, contact details, senior citizen identification details, supporting documents, photographs for verification, and records related to benefits and assistance. Other sensitive personal information will only be processed when necessary and when permitted by applicable law.</p>
+
+                <h5 style="margin: 16px 0 6px; font-size: 0.92rem; color: #0f172a;">2. Purpose of Data Processing</h5>
+                <p style="margin: 0 0 6px;">The collected information will be used for the following purposes:</p>
+                <ul style="margin: 0 0 12px; padding-left: 22px;">
+                    <li>Registration and verification of senior citizens.</li>
+                    <li>Management and updating of senior citizen records.</li>
+                    <li>Monitoring of benefits, applications, and assistance history.</li>
+                    <li>Verification of eligibility and prevention of duplicate or fraudulent claims.</li>
+                    <li>Management of queues, appointments, and priority assistance.</li>
+                    <li>Preparation of authorized reports for OSCA administration.</li>
+                </ul>
+
+                <h5 style="margin: 16px 0 6px; font-size: 0.92rem; color: #0f172a;">3. Protection and Confidentiality</h5>
+                <p style="margin: 0 0 12px;">SilverCare shall implement appropriate organizational, physical, and technical security measures to protect personal information against unauthorized access, disclosure, alteration, loss, or misuse. Access to records shall be restricted to authorized personnel with legitimate official responsibilities.</p>
+                <h5 style="margin: 16px 0 6px; font-size: 0.92rem; color: #0f172a;">4. Disclosure and Sharing of Information</h5>
+                <p style="margin: 0 0 12px;">Personal information shall only be shared with authorized government personnel or other legitimate recipients when necessary for the stated purposes and when permitted by applicable law. Personal information shall not be disclosed to unauthorized individuals or used for unrelated purposes without an appropriate lawful basis.</p>
+
+                <h5 style="margin: 16px 0 6px; font-size: 0.92rem; color: #0f172a;">5. Data Retention and Disposal</h5>
+                <p style="margin: 0 0 12px;">Personal information shall be retained only for as long as necessary to fulfill its intended purpose or comply with applicable legal, regulatory, and government records retention requirements. When retention is no longer necessary or legally required, information shall be securely disposed of or anonymized, as appropriate.</p>
+
+                <h5 style="margin: 16px 0 6px; font-size: 0.92rem; color: #0f172a;">6. Rights of Data Subjects</h5>
+                <p style="margin: 0 0 12px;">Under the Data Privacy Act of 2012, data subjects have applicable rights, including the right to be informed, access their personal information, request correction of inaccurate information, object to certain processing, and seek remedies for violations of their privacy rights. Other rights, including erasure or blocking and data portability, apply subject to the conditions and limitations provided by law.</p>
+                <p style="margin: 0 0 12px;">Requests concerning personal information may be directed to the authorized OSCA Magalang representative or designated Data Protection Officer through the official contact details provided by the office.</p>
+
+                <h5 style="margin: 16px 0 6px; font-size: 0.92rem; color: #0f172a;">7. Consent and Acknowledgment</h5>
+                <p style="margin: 0;">By selecting the checkbox below, you acknowledge that you have read and understood this Privacy Notice and agree to the collection and processing of your personal information for the stated purposes, where consent is the applicable legal basis. Processing that is necessary and authorized by law may rely on another lawful basis. Your acknowledgment does not waive or remove any rights granted to you under Republic Act No. 10173.</p>
+            </div>
+
+            <label for="privacyConsentCheckbox" style="display: flex; gap: 10px; align-items: flex-start; margin: 20px 0; font-size: 0.85rem; color: #334155; line-height: 1.5; cursor: pointer;">
+                <input type="checkbox" id="privacyConsentCheckbox" style="margin-top: 3px; width: 18px; height: 18px; flex-shrink: 0; cursor: pointer;">
+                <span>I have read and understood the Data Privacy Notice in accordance with the Data Privacy Act of 2012 (Republic Act No. 10173), and I acknowledge the applicable processing of my personal information as explained above.</span>
+            </label>
+
+            <button type="button" id="privacyAcceptBtn" class="btn btn-block" style="background: #22c55e; color: white; width: 100%; font-weight: 600;" disabled>
+                <i class="fas fa-check"></i> Accept &amp; Proceed to Login
+            </button>
+        </div>
+
         <!-- Two-Factor Authentication Screen (Admin & OSCA Staff only — hidden initially) -->
         <div id="twoFAContainer" class="glass-container login-card" style="display: none; background: white; margin-top: 20px;">
             <button id="otpBackBtn" type="button" style="background:none; border:none; color:#718096; cursor:pointer; margin-bottom:20px;">
@@ -141,8 +197,21 @@
     <script src="/js/notify.js"></script>
     <script type="module" src="/js/main.js"></script>
     <script>
+        // Senior citizens must read and accept the Data Privacy Notice (RA 10173)
+        // before the login form is shown; every other role goes straight to login.
         function showLogin(role) {
+            if (role === 'senior') {
+                showPrivacy();
+                return;
+            }
+            prepareLogin(role);
+        }
+
+        // Show the login form for a given role (header, links, cleared inputs).
+        function prepareLogin(role) {
             document.getElementById('roleSelection').style.display = 'none';
+            const privacyContainer = document.getElementById('privacyContainer');
+            if (privacyContainer) privacyContainer.style.display = 'none';
             document.getElementById('loginFormContainer').style.display = 'block';
 
             // Password reset link is only offered for the Admin role
@@ -170,10 +239,55 @@
             }
         }
 
+        // Data Privacy Notice screen — shown to seniors before the login form.
+        function showPrivacy() {
+            document.getElementById('roleSelection').style.display = 'none';
+            document.getElementById('loginFormContainer').style.display = 'none';
+            const privacyContainer = document.getElementById('privacyContainer');
+            if (privacyContainer) {
+                privacyContainer.style.display = 'block';
+                const scrollBox = privacyContainer.querySelector('.privacy-scroll');
+                if (scrollBox) scrollBox.scrollTop = 0;
+            }
+            // Require a fresh acknowledgment each time the notice is opened.
+            const checkbox = document.getElementById('privacyConsentCheckbox');
+            const acceptBtn = document.getElementById('privacyAcceptBtn');
+            if (checkbox) checkbox.checked = false;
+            if (acceptBtn) acceptBtn.disabled = true;
+        }
+
         function showRoles() {
             document.getElementById('roleSelection').style.display = 'block';
             document.getElementById('loginFormContainer').style.display = 'none';
+            const privacyContainer = document.getElementById('privacyContainer');
+            if (privacyContainer) privacyContainer.style.display = 'none';
         }
+
+        // Wire the consent checkbox + Accept button (elements exist above this script).
+        (function initPrivacyNotice() {
+            const checkbox = document.getElementById('privacyConsentCheckbox');
+            const acceptBtn = document.getElementById('privacyAcceptBtn');
+            const backBtn = document.getElementById('privacyBackBtn');
+
+            if (checkbox && acceptBtn) {
+                checkbox.addEventListener('change', () => { acceptBtn.disabled = !checkbox.checked; });
+            }
+
+            if (acceptBtn) {
+                acceptBtn.addEventListener('click', () => {
+                    if (!checkbox || !checkbox.checked) {
+                        if (typeof scNotify === 'function') {
+                            scNotify('warning', 'Please read and tick the acknowledgment checkbox before proceeding.', 'Consent Required');
+                        }
+                        return;
+                    }
+                    // Consent given — proceed to the Senior Login form.
+                    prepareLogin('senior');
+                });
+            }
+
+            if (backBtn) backBtn.addEventListener('click', showRoles);
+        })();
     </script>
 </body>
 </html>

@@ -109,9 +109,11 @@ document.addEventListener('DOMContentLoaded', () => {
     const loginFormContainer = document.getElementById('loginFormContainer');
     const twoFAContainer = document.getElementById('twoFAContainer');
     const forgotPwContainer = document.getElementById('forgotPwContainer');
+    const privacyContainer = document.getElementById('privacyContainer');
 
     function showScreen(which) {
         if (roleSelection) roleSelection.style.display = which === 'roles' ? 'block' : 'none';
+        if (privacyContainer) privacyContainer.style.display = which === 'privacy' ? 'block' : 'none';
         if (loginFormContainer) loginFormContainer.style.display = which === 'login' ? 'block' : 'none';
         if (twoFAContainer) twoFAContainer.style.display = which === 'otp' ? 'block' : 'none';
         if (forgotPwContainer) forgotPwContainer.style.display = which === 'forgot' ? 'block' : 'none';
