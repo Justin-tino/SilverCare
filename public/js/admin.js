@@ -206,13 +206,19 @@ document.addEventListener('DOMContentLoaded', () => {
         let employeeCount = 0;
 
         for (const [uid, user] of Object.entries(allUsersData)) {
-            const roleBadgeClass = user.role === 'admin' ? 'blue' : (user.role === 'senior' ? 'purple' : 'staff');
-            const roleDisplay = user.role.charAt(0).toUpperCase() + user.role.slice(1);
+            // Guard against malformed/incomplete user records that are missing a
+            // `role` field. Previously `user.role.charAt(...)` threw a TypeError
+            // here, which aborted this entire render loop BEFORE the Approve/Reject
+            // click listeners were attached further down — making those buttons
+            // appear but do nothing (i.e. "can't approve").
+            const userRole = user.role || '';
+            const roleBadgeClass = userRole === 'admin' ? 'blue' : (userRole === 'senior' ? 'purple' : 'staff');
+            const roleDisplay = userRole ? userRole.charAt(0).toUpperCase() + userRole.slice(1) : 'Unknown';
 
             if (user.status === 'Pending') {
                 pendingCount++;
-                let details = user.email;
-                if (user.role === 'senior') {
+                let details = user.email || 'N/A';
+                if (userRole === 'senior') {
                     details += `<br><span style="font-size:0.8rem; color:#64748b;">ID: ${user.seniorId || 'N/A'}</span>`;
                 }
 
@@ -232,9 +238,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
             const tr = document.createElement('tr');
             const manageBtn = buildManageBtn(uid);
-            const statusBadge = buildStatusBadge(user.status, user.role, user);
+            const statusBadge = buildStatusBadge(user.status, userRole, user);
 
-            if (user.role === 'admin') {
+            if (userRole === 'admin') {
                 adminCount++;
                 tr.innerHTML = `
                     <td style="font-weight: 500;">${user.name || 'N/A'}</td>
@@ -243,7 +249,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     <td>${manageBtn}</td>
                 `;
                 adminTable.appendChild(tr);
-            } else if (user.role === 'employee') {
+            } else if (userRole === 'employee') {
                 employeeCount++;
                 tr.innerHTML = `
                     <td style="font-weight: 500;">${user.name || 'N/A'}</td>
@@ -252,7 +258,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     <td>${manageBtn}</td>
                 `;
                 employeeTable.appendChild(tr);
-            } else if (user.role === 'senior') {
+            } else if (userRole === 'senior') {
                 continue;
             }
         }
