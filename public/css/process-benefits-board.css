@@ -46,7 +46,7 @@
 .pb-foot-head:hover { background: #fafafa; }
 .pb-foot-body { padding: 0 24px 22px; }
 /* Pension tables: keep native table width but never bleed — scroll inside card */
-#pensionSetupContainer.pb-wide-table table,
+#pensionSetupContainer.pb-wide-table table { min-width: 940px; width: 100%; }
 #pensionConfiguredContainer.pb-wide-table table { min-width: 760px; width: 100%; }
 #pensionSetupContainer.pb-wide-table,
 #pensionConfiguredContainer.pb-wide-table { overflow-x: auto; -webkit-overflow-scrolling: touch; }

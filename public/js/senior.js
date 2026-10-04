@@ -352,8 +352,10 @@ document.addEventListener('DOMContentLoaded', () => {
                     update(ref(db, 'users/' + data.uid), { seniorCategory: seniorCategory, seniorCategoryAssignedAt: Date.now() });
                 }
             } else {
-                dashSeniorCategory.textContent = kycStatusForCategory === 'Verified' ? '—' : 'Not Verified';
-                dashSeniorCategory.style.color = '#94a3b8';
+                // Verified but no milestone category (age isn't 80/85/90/95/100)
+                const verifiedNoCategory = kycStatusForCategory === 'Verified';
+                dashSeniorCategory.textContent = verifiedNoCategory ? 'Verified Senior' : 'Not Verified';
+                dashSeniorCategory.style.color = verifiedNoCategory ? '#16a34a' : '#94a3b8';
             }
         }
 
@@ -3135,11 +3137,17 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // ── Age Requirement & Milestone Category Forms ────────────────────────────
-    // 80-89 = Octogenarian, 90-99 = Nonagenarian, 100+ = Centenarian
+    // A category is assigned ONLY at the exact milestone ages:
+    //   80 or 85  = Octogenarian
+    //   90 or 95  = Nonagenarian
+    //   100       = Centenarian
+    // Every other eligible age (60+) still completes the form, but stays
+    // uncategorized — a plain "Verified Senior".
     function getKycMilestoneCategory(age) {
-        if (age >= 80 && age <= 89) return 'Octogenarian';
-        if (age >= 90 && age <= 99) return 'Nonagenarian';
-        if (age >= 100) return 'Centenarian';
+        const a = parseInt(age, 10);
+        if (a === 80 || a === 85) return 'Octogenarian';
+        if (a === 90 || a === 95) return 'Nonagenarian';
+        if (a === 100) return 'Centenarian';
         return null;
     }
 
@@ -3187,30 +3195,38 @@ document.addEventListener('DOMContentLoaded', () => {
         const milestoneSection = document.getElementById('kycMilestoneSection');
         if (!milestoneSection) return null;
 
-        const category = getKycMilestoneCategory(age);
+        const numericAge = parseInt(age, 10);
+        // A category only exists at the exact milestone ages (80, 85, 90, 95, 100).
+        // Every other eligible age (60+) still files the same form, but the
+        // interstitial header reads "Verification Form" instead of a category name.
+        const category = getKycMilestoneCategory(numericAge);
+        const formTitleText = category ? `${category} Benefit Program Form` : 'Verification Form';
 
         // Keep the interstitial header in sync with the age-based category
         const stepFormTitle = document.getElementById('kycStepFormTitle');
         const stepFormSubtitle = document.getElementById('kycStepFormSubtitle');
-        if (stepFormTitle && category) stepFormTitle.textContent = `${category} Benefit Program Form`;
-        if (stepFormSubtitle && category) stepFormSubtitle.textContent = `Based on your age (${age}), please complete the ${category} Benefit Program application form (R.A. No. 11982, NCSC Annex "A"). Your Senior Citizen ID will be collected on Step 4.`;
-
-        if (!category) {
-            milestoneSection.style.display = 'none';
-            milestoneSection.innerHTML = '';
-            delete milestoneSection.dataset.category;
-            return null;
+        if (stepFormTitle) stepFormTitle.textContent = formTitleText;
+        if (stepFormSubtitle) {
+            stepFormSubtitle.textContent = category
+                ? `Based on your age (${numericAge}), please complete the ${category} Benefit Program application form (R.A. No. 11982, NCSC Annex "A"). Your Senior Citizen ID will be collected on Step 4.`
+                : `Based on your age (${numericAge}), please complete the verification form (R.A. No. 11982, NCSC Annex "A"). Your Senior Citizen ID will be collected on Step 4.`;
         }
 
-        // Keep already-typed answers when re-rendering for the same category
-        if (milestoneSection.dataset.category === category && milestoneSection.innerHTML) {
+        // Key the rendered form by category, or by exact age when uncategorized,
+        // so already-typed answers survive a re-render but the prefill age stays fresh.
+        const formKey = category || `none-${numericAge}`;
+
+        // Keep already-typed answers when re-rendering for the same category/age
+        if (milestoneSection.dataset.formKey === formKey && milestoneSection.innerHTML) {
             milestoneSection.style.display = 'flex';
             return category;
         }
 
-        const defaultMilestoneAge = (age >= 85 && age <= 89) ? 85 : (age >= 95 && age <= 99) ? 95 : Math.min(age, 100);
-        milestoneSection.dataset.category = category;
-        milestoneSection.innerHTML = buildMilestoneFormHtml(category, { prefillAge: age, defaultMilestoneAge: defaultMilestoneAge });
+        const defaultMilestoneAge = (numericAge >= 85 && numericAge <= 89) ? 85 : (numericAge >= 95 && numericAge <= 99) ? 95 : Math.min(numericAge, 100);
+        milestoneSection.dataset.category = category || '';
+        milestoneSection.dataset.hasForm = '1';
+        milestoneSection.dataset.formKey = formKey;
+        milestoneSection.innerHTML = buildMilestoneFormHtml(category, { prefillAge: numericAge, defaultMilestoneAge: defaultMilestoneAge });
         milestoneSection.style.display = 'flex';
         // Sync Sex/Civil Status from base KYC fields into milestone's Annex A to avoid double entry (profile auto-sync)
         try {
@@ -3237,16 +3253,27 @@ document.addEventListener('DOMContentLoaded', () => {
         const defaultSex = currentUserData ? (currentUserData.sex || 'Female') : 'Female';
         const defaultCivil = currentUserData ? (currentUserData.civilStatus || 'Married') : 'Married';
 
+        // Milestone-age choices: category-specific when a category applies,
+        // otherwise every milestone age (uncategorized "Verification Form").
         const milestoneChoices = category === 'Octogenarian' ? [80, 85]
             : category === 'Nonagenarian' ? [90, 95]
-            : [100];
-        const milestoneOptions = milestoneChoices.map(val =>
-            `<option value="${val}" ${val === defaultMilestoneAge ? 'selected' : ''}>${val}</option>`
-        ).join('');
+            : category === 'Centenarian' ? [100]
+            : [80, 85, 90, 95, 100];
+        const milestoneOptions = category
+            ? milestoneChoices.map(val =>
+                `<option value="${val}" ${val === defaultMilestoneAge ? 'selected' : ''}>${val}</option>`
+            ).join('')
+            : `<option value="" disabled selected>Select milestone age</option>` + milestoneChoices.map(val =>
+                `<option value="${val}">${val}</option>`
+            ).join('');
+
+        // Title mirrors the interstitial header: the category name when a
+        // category applies, "Verification Form" otherwise.
+        const formHeading = category ? `${category} Benefit Program` : 'Verification Form';
 
         let html = `
             <div class="kyc-form-header" style="margin-top: 25px; border-left: 4px solid #16a34a; padding-left: 14px;">
-                <h3><i class="fas fa-award" style="color: #16a34a; margin-right: 8px;"></i>${category} Benefit Program</h3>
+                <h3><i class="fas fa-award" style="color: #16a34a; margin-right: 8px;"></i>${formHeading}</h3>
                 <p>Octogenarian, Nonagenarian and Centenarian Benefit Program — Application Form, Republic Act (R.A.) No. 11982 (NCSC Annex "A"). Please complete the form below, then provide your Senior Citizen ID.</p>
             </div>
 
@@ -3710,7 +3737,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // Face Scan but NOT as a numbered circle — the header stays 1..4.
     function hasKycMilestoneForm() {
         const milestoneSection = document.getElementById('kycMilestoneSection');
-        return !!(milestoneSection && milestoneSection.dataset.category && milestoneSection.innerHTML);
+        return !!(milestoneSection && milestoneSection.dataset.hasForm && milestoneSection.innerHTML);
     }
 
     function goToKycStep(step) {
@@ -3860,16 +3887,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 return;
             }
 
-            // Age 80+: advance to the dedicated Benefit Program Form step (Annex A + Senior ID)
-            const milestoneCategory = getKycMilestoneCategory(ageVal);
-            if (milestoneCategory) {
-                renderKycMilestoneSection(ageVal);
-                goToKycStep('form');
-                return;
-            }
-
-            // Under 80: no Benefit Program form needed — go straight to Face Scan
-            goToKycStep(2);
+            // Every eligible senior (60+) completes the Benefit Program /
+            // verification form (Annex A). A category is only assigned at the
+            // exact milestone ages (80, 85, 90, 95, 100); all other ages still
+            // file the form but stay uncategorized (a plain Verified Senior).
+            renderKycMilestoneSection(ageVal);
+            goToKycStep('form');
         });
     }
 
@@ -3911,12 +3934,13 @@ document.addEventListener('DOMContentLoaded', () => {
         kycFormNextBtn.addEventListener('click', () => {
             const milestoneSection = document.getElementById('kycMilestoneSection');
             const category = milestoneSection?.dataset.category || '';
+            const formLabel = category ? `${category} Form` : 'Verification Form';
 
             const requiredMilestoneFields = milestoneSection ? milestoneSection.querySelectorAll('input[required], select[required]') : [];
             for (const field of requiredMilestoneFields) {
                 if (!(field.value || '').trim()) {
                     const groupLabel = field.closest('.form-group')?.querySelector('label')?.textContent.trim() || field.closest('.kyc-field')?.querySelector('label')?.textContent.trim() || 'this field';
-                    showToast(`⚠️ ${category} Form: please complete "${groupLabel.replace('*', '').trim()}".`);
+                    showToast(`⚠️ ${formLabel}: please complete "${groupLabel.replace('*', '').trim()}".`);
                     field.focus();
                     return;
                 }
@@ -3938,7 +3962,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (kycBackBtn) {
         kycBackBtn.addEventListener('click', () => {
             const milestoneSection = document.getElementById('kycMilestoneSection');
-            const hasForm = !!(milestoneSection && milestoneSection.dataset.category && milestoneSection.innerHTML);
+            const hasForm = !!(milestoneSection && milestoneSection.dataset.hasForm && milestoneSection.innerHTML);
             goToKycStep(hasForm ? 'form' : 1);
         });
     }

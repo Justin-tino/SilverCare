@@ -75,13 +75,21 @@ check('smsSafe bounds length', api.smsSafe('x'.repeat(500), 20).length, 20);
 check('smsSafe keeps UTF-8 names', api.smsSafe('Peña, José'), 'Peña, José');
 
 // --- buildStatusSms: every event the user asked for produces a usable text ---
-const verified = api.buildStatusSms({ type: 'account_verified', name: 'Juan Peña' });
-checkTrue('account_verified says VERIFIED', verified.includes('VERIFIED'));
-checkTrue('account_verified greets the senior', verified.includes('Juan Peña'));
-
+// Pension approval (sent when verification auto-activates the pension setup).
 const approved = api.buildStatusSms({ type: 'pension_approved', name: 'Juan', localAmount: '1000', nationalAmount: '3000', quarterlyTotal: '6000' });
 checkTrue('pension_approved says APPROVED', approved.includes('APPROVED'));
 checkTrue('pension_approved shows quarterly total', approved.includes('PHP 6,000'));
+
+// Assistance approval (claim approved -> payout being released).
+const assistance = api.buildStatusSms({ type: 'claim_approved', name: 'Juan', amount: '10000', serviceType: 'burial', refNumber: 'AB12CD34' });
+checkTrue('claim_approved says APPROVED', assistance.includes('APPROVED'));
+checkTrue('claim_approved names the service', assistance.includes('BURIAL'));
+checkTrue('claim_approved shows the amount', assistance.includes('PHP 10,000'));
+
+// Custom notification message (one senior or broadcast to everyone).
+const announcement = api.buildStatusSms({ type: 'announcement', name: 'Juan', message: 'Payout on Friday at the OSCA office.' });
+checkTrue('announcement carries the custom text', announcement.includes('Payout on Friday'));
+checkTrue('announcement greets the senior', announcement.includes('Juan'));
 
 const releasing = api.buildStatusSms({ type: 'pension_releasing', name: 'Juan', amount: '1000', period: '2026-09' });
 checkTrue('pension_releasing says being RELEASED', releasing.includes('being RELEASED'));
@@ -100,16 +108,17 @@ checkTrue('claim_released names the service', claimOut.includes('BURIAL'));
 
 // --- every template must stay inside the SMS length budget ---
 const longest = [
-    verified, approved, releasing, released, declined, claimOut,
+    approved, assistance, announcement, releasing, released, declined, claimOut,
     api.buildStatusSms({ type: 'claim_releasing', name: 'Maximiliano Dela Cruz y Santos', amount: '100000', serviceType: 'financial assistance', refNumber: 'ZZ99YY88' }),
     api.buildStatusSms({ type: 'claim_declined', name: 'Maximiliano Dela Cruz y Santos', serviceType: 'burial', reason: 'Required documentation was missing or could not be verified by the local OSCA officers.' }),
-    api.buildStatusSms({ type: 'account_verified', name: 'x'.repeat(200) })
+    api.buildStatusSms({ type: 'announcement', name: 'x'.repeat(200), message: 'y'.repeat(400) })
 ].reduce((a, b) => (a.length > b.length ? a : b));
 checkTrue('longest template under 480 chars', longest.length <= 480);
 
 // --- the accepted type list must cover the events wired in the UI ---
-['account_verified', 'pension_approved', 'pension_releasing', 'pension_released', 'pension_declined']
+['pension_approved', 'claim_approved', 'announcement', 'pension_releasing', 'pension_released', 'pension_declined']
     .forEach(t => checkTrue('type allowed: ' + t, api.SMS_NOTIFICATION_TYPES.includes(t)));
+checkTrue('account_verified retired', !api.SMS_NOTIFICATION_TYPES.includes('account_verified'));
 checkTrue('unknown type rejected', !api.SMS_NOTIFICATION_TYPES.includes('spam_relay'));
 
 // --- the exact TextBee request contract ---
@@ -119,6 +128,7 @@ checkTrue('recipients array is sent', src.includes('{ recipients: [recipient], m
 checkTrue('deviceId only when pinned', src.includes('if (process.env.TEXTBEE_DEVICE_ID) payload.deviceId'));
 checkTrue('CP number read from the senior profile', src.includes('const phone = String(user.cpNumber'));
 checkTrue('route /api/send-status-sms exists', src.includes("app.post('/api/send-status-sms'"));
+checkTrue('route /api/send-announcement-sms exists', src.includes("app.post('/api/send-announcement-sms'"));
 checkTrue('route /api/sms-status exists', src.includes("app.get('/api/sms-status'"));
 
 // --- notifySeniorSms decision logic, with admin + sender injected ---
@@ -145,7 +155,7 @@ async function verifyNotifier() {
     let sends = 0;
     audits.length = 0;
     let notify = makeNotifier({ name: 'Juan', cpNumber: '' }, async () => { sends++; });
-    let res = await notify('uid-blank', 'account_verified');
+    let res = await notify('uid-blank', 'pension_approved');
     check('no CP number -> not sent', res.sent, false);
     check('no CP number -> explains why', res.reason, 'This senior has no mobile (CP) number on file.');
     check('no CP number -> no send attempted', sends, 0);
@@ -153,7 +163,7 @@ async function verifyNotifier() {
 
     // 1b) Senior record that does not exist -> clean refusal, nothing audited.
     audits.length = 0;
-    res = await makeNotifier(null, async () => { sends++; })('uid-missing', 'account_verified');
+    res = await makeNotifier(null, async () => { sends++; })('uid-missing', 'pension_approved');
     check('missing senior -> reason', res.reason, 'Senior record not found.');
     check('missing senior -> no send attempted', sends, 0);
 
@@ -180,7 +190,7 @@ async function verifyNotifier() {
     // 4) Gateway down -> the caller must still succeed (never throws).
     audits.length = 0;
     const notifyFail = makeNotifier({ name: 'Juan', cpNumber: '09171234567' }, async () => { throw new Error('gateway offline'); });
-    res = await notifyFail('uid-fail', 'account_verified');
+    res = await notifyFail('uid-fail', 'claim_approved');
     check('gateway failure -> not sent', res.sent, false);
     check('gateway failure -> reason surfaced', res.reason, 'gateway offline');
     check('gateway failure -> audited', audits[0].action, 'SMS_STATUS_FAILED');
@@ -188,6 +198,18 @@ async function verifyNotifier() {
     // 4) Unknown event type must be refused (the gateway is not an open relay).
     const notifyUnknown = makeNotifier({ name: 'Juan', cpNumber: '09171234567' }, async () => { sends++; });
     check('unknown type -> reason', (await notifyUnknown('uid-x', 'marketing_blast')).reason, 'Unknown SMS notification type.');
+
+    // 5) Retired account_verified type must now be refused as unknown.
+    check('retired account_verified -> reason', (await notifyUnknown('uid-x', 'account_verified')).reason, 'Unknown SMS notification type.');
+
+    // 6) Announcement happy path: custom staff message reaches the gateway.
+    audits.length = 0;
+    let announcedTo = null;
+    const notifyAnnounce = makeNotifier({ name: 'Juan', cpNumber: '0917 123 4567' }, async ({ to, message }) => { announcedTo = { to, message }; });
+    res = await notifyAnnounce('uid-ok', 'announcement', { message: 'Payout on Friday at the OSCA office.' });
+    check('announcement -> sent', res.sent, true);
+    checkTrue('announcement -> carries custom text', announcedTo.message.includes('Payout on Friday'));
+    check('announcement -> audited', audits[0].action, 'SMS_STATUS_SENT');
 }
 
 // --- the exact TextBee request contract, exercised with a mocked fetch ---

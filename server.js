@@ -313,9 +313,9 @@ const SMS_MAX_LENGTH = 480;
 // Events a senior can be texted about. Anything outside this list is rejected,
 // so the gateway can never be used as an open SMS relay.
 const SMS_NOTIFICATION_TYPES = [
-    'account_verified',
     'pension_approved', 'pension_releasing', 'pension_released', 'pension_declined',
-    'claim_approved', 'claim_releasing', 'claim_released', 'claim_declined'
+    'claim_approved', 'claim_releasing', 'claim_released', 'claim_declined',
+    'announcement'
 ];
 
 // Mobile numbers are stored exactly as typed ("0917 123 4567",
@@ -408,7 +408,7 @@ function smsStatusPayload() {
 // Short, GSM-7 friendly notice per event. Plain "PHP" instead of "₱" and no
 // emoji on purpose: those symbols force UCS-2 encoding, which halves the
 // characters that fit in one SMS segment.
-function buildStatusSms({ type, name, amount, localAmount, nationalAmount, quarterlyTotal, refNumber, serviceType, reason, period }) {
+function buildStatusSms({ type, name, amount, localAmount, nationalAmount, quarterlyTotal, refNumber, serviceType, reason, period, message }) {
     const who = smsSafe(name, 40) || 'Senior Citizen';
     const peso = v => Number(String(v === null || v === undefined ? '' : v).replace(/[^\d.]/g, '')) || 0;
     const php = v => `PHP ${peso(v).toLocaleString()}`;
@@ -418,9 +418,6 @@ function buildStatusSms({ type, name, amount, localAmount, nationalAmount, quart
     const tail = ' -OSCA Magalang';
 
     switch (type) {
-        case 'account_verified':
-            return `SilverCare OSCA: Hello ${who}, your senior account is now VERIFIED. You may log in to the SilverCare portal to view your pension and benefits. Keep your OSCA ID ready.${tail}`;
-
         case 'pension_approved':
             return `SilverCare OSCA: Good news ${who}! Your pension is APPROVED - Local ${php(localAmount || amount)} per month + National ${php(nationalAmount)} per quarter, quarterly total ${php(quarterlyTotal || amount)}. Bring your OSCA ID when claiming.${tail}`;
 
@@ -442,6 +439,12 @@ function buildStatusSms({ type, name, amount, localAmount, nationalAmount, quart
 
         case 'claim_declined':
             return `SilverCare OSCA: ${who}, your ${svc || 'ASSISTANCE'} request was DECLINED. ${smsSafe(reason, 110) || 'Please visit the OSCA Magalang office with your documents.'}${repo}${tail}`;
+
+        case 'announcement': {
+            const custom = smsSafe(message, 300);
+            if (!custom) return `SilverCare OSCA: ${who}, there is an announcement from the OSCA Magalang office. Please open your portal or visit the office.${tail}`;
+            return `SilverCare OSCA: ${who}, ${custom}${tail}`;
+        }
 
         default:
             return `SilverCare OSCA: ${who}, there is an update on your SilverCare account. Please open your portal or visit the OSCA Magalang office.${tail}`;
@@ -866,7 +869,8 @@ app.post('/api/send-status-sms', requireAuth, requireRole('admin', 'employee'), 
         refNumber: smsSafe(body.refNumber, 24),
         serviceType: smsSafe(body.serviceType, 40),
         reason: smsSafe(body.reason, 120),
-        period: smsSafe(body.period, 20)
+        period: smsSafe(body.period, 20),
+        message: smsSafe(body.message, 300)
     };
 
     const result = await notifySeniorSms(uid, type, extra);
@@ -874,6 +878,71 @@ app.post('/api/send-status-sms', requireAuth, requireRole('admin', 'employee'), 
         return res.json({ success: true, message: 'Status SMS sent to the senior.', to: result.to, type: type });
     }
     res.json({ success: true, skipped: true, message: result.reason || 'SMS not sent.', type: type });
+});
+
+// --- API: Send Announcement / Custom SMS (TextBee) ---
+// Staff-composed notice to ONE senior (uid) or EVERYONE (broadcast=true).
+// The text always comes from the staff message box; recipients are always
+// resolved from senior profiles (users/{uid}/cpNumber) — never from the
+// request body — so the gateway can never text an arbitrary number.
+// Supported:
+//   POST { uid, message }                 -> one specific senior
+//   POST { uids: [uid...], message }      -> a specific set of seniors
+//   POST { broadcast: true, message }     -> every senior with a valid number
+// Best-effort: answers 200 with per-recipient sent/skipped counts. A sleeping
+// Android gateway or missing CP numbers never fail the request.
+app.post('/api/send-announcement-sms', requireAuth, requireRole('admin', 'employee'), async (req, res) => {
+    const body = req.body || {};
+    const message = smsSafe(body.message, 300);
+    if (!message) return res.status(400).json({ success: false, message: 'A message is required (max 300 characters).' });
+
+    const broadcast = body.broadcast === true || body.broadcast === 'true';
+    let uids = [];
+    if (broadcast) {
+        try {
+            const snap = await admin.database().ref('users').once('value');
+            const users = snap.val() || {};
+            uids = Object.entries(users)
+                .filter(([, u]) => u && u.role === 'senior' && String(u.status || '') !== 'Rejected' &&
+                    !['Deceased', 'Transferred', 'Archived'].includes(String(u.lifeStatus || '')))
+                .map(([uid]) => uid);
+        } catch (e) {
+            return res.status(500).json({ success: false, message: 'Could not load senior records: ' + e.message });
+        }
+    } else if (Array.isArray(body.uids)) {
+        uids = body.uids.map(v => smsSafe(v, 64)).filter(Boolean).slice(0, 500);
+    } else if (body.uid) {
+        uids = [smsSafe(body.uid, 64)].filter(Boolean);
+    }
+    if (!uids.length) {
+        return res.status(400).json({ success: false, message: 'Provide a senior uid, a uids array, or broadcast:true for everyone.' });
+    }
+
+    const extra = {
+        amount: smsSafe(body.amount, 20),
+        localAmount: smsSafe(body.localAmount, 20),
+        nationalAmount: smsSafe(body.nationalAmount, 20),
+        quarterlyTotal: smsSafe(body.quarterlyTotal, 20),
+        refNumber: smsSafe(body.refNumber, 24),
+        serviceType: smsSafe(body.serviceType, 40),
+        reason: smsSafe(body.reason, 120),
+        period: smsSafe(body.period, 20),
+        message
+    };
+
+    const results = [];
+    for (const uid of uids) {
+        // Sequential sends: one TextBee HTTP call per senior, so the gateway
+        // phone is never flooded with a parallel burst.
+        // eslint-disable-next-line no-await-in-loop
+        const r = await notifySeniorSms(uid, 'announcement', extra);
+        results.push({ uid, sent: r.sent, to: r.to || null, reason: r.sent ? null : (r.reason || 'SMS not sent.') });
+    }
+    const sent = results.filter(r => r.sent).length;
+    const skipped = results.length - sent;
+    await writeAuditLog('SMS_ANNOUNCEMENT_SENT', req.authUser, null, null,
+        `Announcement SMS ("${message.slice(0, 120)}") — ${sent} sent, ${skipped} skipped out of ${results.length}.`);
+    res.json({ success: true, message: `Announcement SMS processed: ${sent} sent, ${skipped} skipped.`, sent, skipped, total: results.length, results });
 });
 
 // ============================================================
@@ -1557,12 +1626,14 @@ app.post('/api/register-senior', requireAuth, requireRole('admin', 'employee'), 
             displayName: fullname || `${firstName} ${lastName}`
         });
 
-        // Derive age from DOB and assign the age-based milestone senior category
-        // (80-89 Octogenarian, 90-99 Nonagenarian, 100+ Centenarian) the same way
-        // the senior self-KYC flow does, so walk-in accounts show it on the dashboard.
+        // Derive age from DOB and assign the age-based milestone senior category ONLY
+        // at the exact milestone ages (80/85 Octogenarian, 90/95 Nonagenarian,
+        // 100 Centenarian) — matching the senior self-KYC flow. Any other age is
+        // registered as a plain verified senior with no category.
         const derivedAge = computeAgeFromDob(dob);
-        const seniorCategory = derivedAge !== null && derivedAge >= 80
-            ? (derivedAge >= 100 ? 'Centenarian' : derivedAge >= 90 ? 'Nonagenarian' : 'Octogenarian')
+        const seniorCategory = (derivedAge === 80 || derivedAge === 85) ? 'Octogenarian'
+            : (derivedAge === 90 || derivedAge === 95) ? 'Nonagenarian'
+            : (derivedAge === 100) ? 'Centenarian'
             : '';
 
         // Save to Realtime Database as Active (no approval needed — employee-registered)
@@ -1622,11 +1693,15 @@ app.post('/api/register-senior', requireAuth, requireRole('admin', 'employee'), 
             }).catch(err => console.error('Supabase senior mirror failed (registration):', err.message));
         }
 
-        // Official welcome SMS (TextBee): a walk-in account is created already
-        // VERIFIED, so the senior is told right away. Fire-and-forget — the
-        // gateway is best-effort and must never delay or break the creation.
-        notifySeniorSms(userRecord.uid, 'account_verified')
-            .catch(err => console.warn('Verification SMS skipped:', err.message));
+        // Pension approval SMS (TextBee): a walk-in account is created already
+        // VERIFIED with an auto-activated pension, so the senior is told about
+        // the pension approval right away. Fire-and-forget — the gateway is
+        // best-effort and must never delay or break the creation.
+        notifySeniorSms(userRecord.uid, 'pension_approved', {
+            localAmount: '1000',
+            nationalAmount: '3000',
+            quarterlyTotal: '6000'
+        }).catch(err => console.warn('Pension approval SMS skipped:', err.message));
 
         res.json({ success: true, message: 'Senior citizen account created successfully.', uid: userRecord.uid });
     } catch (error) {

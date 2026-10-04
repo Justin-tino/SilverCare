@@ -1260,7 +1260,7 @@ function renderEmployeeDashboard(usersData) {
                                 <tr><td style="padding: 6px 8px 6px 0; color: #64748b; font-weight: 600;">Cellphone No.</td><td style="padding: 6px 0; color: #1e293b;">${escHtml(user.cpNumber || 'N/A')}</td></tr>
                                 <tr><td style="padding: 6px 8px 6px 0; color: #64748b; font-weight: 600;">Health Condition / Illness</td><td style="padding: 6px 0; font-weight:700; color: ${hasReportedIllness(user) ? '#b91c1c' : '#16a34a'};">${escHtml(user.healthCondition || user.condition || user.illness || 'None reported')}</td></tr>
                                 ${(hasReportedIllness(user) && user.illnessDetails && user.illnessDetails !== (user.healthCondition || user.condition || user.illness)) ? `<tr><td style="padding: 6px 8px 6px 0; color: #64748b; font-weight: 600;">Illness Details</td><td style="padding: 6px 0; color: #1e293b;">${escHtml(user.illnessDetails)}</td></tr>` : ''}
-                                <tr><td style="padding: 6px 8px 6px 0; color: #64748b; font-weight: 600;">Senior Category</td><td style="padding: 6px 0; font-weight:600; color: #6d28d9;">${escHtml(user.seniorCategory || 'None (below 80)')}</td></tr>
+                                <tr><td style="padding: 6px 8px 6px 0; color: #64748b; font-weight: 600;">Senior Category</td><td style="padding: 6px 0; font-weight:600; color: #6d28d9;">${escHtml(user.seniorCategory || 'None')}</td></tr>
                                 <tr><td style="padding: 6px 8px 6px 0; color: #64748b; font-weight: 600;">Suggested Priority Level</td><td style="padding: 6px 0; font-weight: 800; color: ${prioColor};">${escHtml(prioLevel || 'Low')}</td></tr>
                             </table>
                             <p style="margin: 8px 0 0; font-size: 0.72rem; color: #94a3b8;"><i class="fas fa-circle-info" style="margin-right:4px;"></i>The Senior Category and Priority Level are system-suggested from the senior's age and health answers — OSCA staff make the final decision when approving.</p>
@@ -2414,6 +2414,25 @@ function renderPensionSetup(usersData) {
     const configuredContainer = document.getElementById('pensionConfiguredContainer');
     const badge = document.getElementById('pensionSetupBadge');
 
+    // Preserve any custom amounts already typed into the pending table so a
+    // live data refresh (another senior verifying, etc.) does not wipe them
+    // before the staff clicks "Grant Pension".
+    const customAmounts = {};
+    setupContainer.querySelectorAll('.pension-grant-local, .pension-grant-national').forEach(inp => {
+        const inpUid = inp.dataset.uid;
+        if (!inpUid) return;
+        if (!customAmounts[inpUid]) customAmounts[inpUid] = {};
+        customAmounts[inpUid][inp.classList.contains('pension-grant-local') ? 'local' : 'national'] = inp.value.trim();
+    });
+    const grantLocalValue = (uid) => {
+        const v = customAmounts[uid] && customAmounts[uid].local;
+        return (v !== undefined && v !== '') ? v : (Math.round(Number(pensionSettingsCache.local)) || DEFAULT_LOCAL_PENSION);
+    };
+    const grantNationalValue = (uid) => {
+        const v = customAmounts[uid] && customAmounts[uid].national;
+        return (v !== undefined && v !== '') ? v : (Math.round(Number(pensionSettingsCache.national)) || DEFAULT_NATIONAL_PENSION);
+    };
+
     const seniors = Object.entries(usersData)
         .filter(([, u]) => u && u.role === 'senior' && !isArchivedSenior(u))
         .map(([uid, u]) => ({ uid, ...u }));
@@ -2451,7 +2470,7 @@ function renderPensionSetup(usersData) {
                         <th style="padding:8px 10px; font-weight:600;">OSCA ID</th>
                         <th style="padding:8px 10px; font-weight:600;">Priority</th>
                         <th style="padding:8px 10px; font-weight:600;">Age</th>
-                        <th style="padding:8px 10px; font-weight:600;">Pension</th>
+                        <th style="padding:8px 10px; font-weight:600;">Pension <span style="font-weight:400; color:#71717a; font-size:0.78rem;">(custom amount)</span></th>
                         <th style="padding:8px 10px; font-weight:600; width:130px;"></th>
                     </tr>
                 </thead>
@@ -2462,7 +2481,22 @@ function renderPensionSetup(usersData) {
                         <td style="padding:10px; color:#3f3f46;">${escHtml(s.seniorId || 'N/A')}</td>
                         <td style="padding:10px;">${priorityPillHtml(s._prio)}</td>
                         <td style="padding:10px; color:#3f3f46;">${escHtml(String(s.age ?? 'N/A'))}</td>
-                        <td style="padding:10px; color:#166534; font-weight:600; font-size:0.82rem;">Local ₱${Number(pensionSettingsCache.local).toLocaleString()}/mo<br>National ₱${Number(pensionSettingsCache.national).toLocaleString()}/qtr</td>
+                        <td style="padding:10px;">
+                            <div style="display:flex; flex-direction:column; gap:8px; min-width:170px;">
+                                <label style="display:block; font-size:0.68rem; font-weight:700; color:#475569; text-transform:uppercase; letter-spacing:0.3px;">
+                                    Local (₱/mo)
+                                    <input type="number" min="0" step="1" inputmode="numeric" class="pension-grant-local" data-uid="${s.uid}"
+                                        value="${grantLocalValue(s.uid)}"
+                                        style="margin-top:3px; width:100%; padding:6px 8px; border:1px solid #cbd5e1; border-radius:6px; font-size:0.85rem; font-weight:700; color:#166534; box-sizing:border-box;">
+                                </label>
+                                <label style="display:block; font-size:0.68rem; font-weight:700; color:#475569; text-transform:uppercase; letter-spacing:0.3px;">
+                                    National (₱/qtr)
+                                    <input type="number" min="0" step="1" inputmode="numeric" class="pension-grant-national" data-uid="${s.uid}"
+                                        value="${grantNationalValue(s.uid)}"
+                                        style="margin-top:3px; width:100%; padding:6px 8px; border:1px solid #cbd5e1; border-radius:6px; font-size:0.85rem; font-weight:700; color:#1d4ed8; box-sizing:border-box;">
+                                </label>
+                            </div>
+                        </td>
                         <td style="padding:10px;">
                             <button style="background:#166534; color:#ffffff; border:none; padding:8px 16px; border-radius:4px; font-weight:600; font-size:0.85rem; cursor:pointer;"
                                 data-action="pension-grant" data-uid="${s.uid}" data-seniorname="${escHtml(s.name || '')}">Grant Pension</button>
@@ -2512,13 +2546,24 @@ function renderPensionSetup(usersData) {
         }
     }
 
-    // Grant pension (pending -> grant both Local + National at current global amounts)
+    // Grant pension (pending -> grant the amount entered for this senior).
+    // The amount is customisable per senior — Local (monthly) and/or National
+    // (quarterly) — and defaults to the current global pension settings.
     document.querySelectorAll('[data-action="pension-grant"]').forEach(btn => {
         btn.onclick = async () => {
             const uid = btn.dataset.uid;
             const seniorName = btn.dataset.seniorname || 'senior';
-            const local = Math.round(Number(pensionSettingsCache.local)) || DEFAULT_LOCAL_PENSION;
-            const national = Math.round(Number(pensionSettingsCache.national)) || DEFAULT_NATIONAL_PENSION;
+            const row = btn.closest('tr');
+            const localInput = row ? row.querySelector('.pension-grant-local') : null;
+            const nationalInput = row ? row.querySelector('.pension-grant-national') : null;
+            const local = Math.round(Number(localInput ? localInput.value : pensionSettingsCache.local)) || 0;
+            const national = Math.round(Number(nationalInput ? nationalInput.value : pensionSettingsCache.national)) || 0;
+            if (!(local > 0) || !(national > 0)) {
+                scNotify('error', 'Please enter a valid pension amount — both Local (₱/month) and National (₱/quarter) must be greater than 0.');
+                const focusEl = !(local > 0) ? (localInput || nationalInput) : nationalInput;
+                if (focusEl) focusEl.focus();
+                return;
+            }
             const qtr = local * 3 + national;
             const actorName = (window.currentStaffName || '').trim() || 'OSCA Staff';
             confirmAction(`Grant pension to ${seniorName}? Local ₱${local.toLocaleString()}/month + National ₱${national.toLocaleString()}/quarter.`, async () => {
@@ -3159,9 +3204,9 @@ function openClaimDetailsModal(claimId, claim) {
                 }
             } catch (emailErr) { console.error('Claim approval e-mail error:', emailErr); }
 
-            // Official "releasing" SMS (TextBee): the claim is approved and the
-            // payout is being prepared. Best-effort — the approval is already
-            // saved, so a sleeping gateway can never fail this modal action.
+            // Official approval SMS (TextBee): pension approve vs assistance
+            // approved. Best-effort — the approval is already saved, so a
+            // sleeping gateway can never fail this modal action.
             try {
                 if (auth.currentUser) {
                     const smsToken = await auth.currentUser.getIdToken();
@@ -3170,14 +3215,17 @@ function openClaimDetailsModal(claimId, claim) {
                         headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + smsToken },
                         body: JSON.stringify({
                             uid: seniorUid,
-                            type: /pension/i.test(String(serviceType || '')) ? 'pension_releasing' : 'claim_releasing',
+                            type: /pension/i.test(String(serviceType || '')) ? 'pension_approved' : 'claim_approved',
                             amount: String(claim.paidAmount || claim.amount || ''),
+                            localAmount: String(claim.paidAmount || claim.amount || ''),
+                            nationalAmount: '',
+                            quarterlyTotal: String(claim.paidAmount || claim.amount || ''),
                             serviceType: serviceType,
                             refNumber: refNum
                         })
                     }).catch(console.error);
                 }
-            } catch (smsErr) { console.warn('Releasing SMS skipped:', smsErr.message); }
+            } catch (smsErr) { console.warn('Approval SMS skipped:', smsErr.message); }
 
             modal.style.display = 'none';
             scNotify('success', 'Claim Approved! Senior notified in-app, by e-mail & SMS.');
@@ -3323,18 +3371,28 @@ function attachButtonListeners() {
                 if (card) card.style.display = 'none';
                 scNotify('success', 'Senior identity verified successfully!');
 
-                // Official SMS (TextBee): the account is now verified. The server
-                // reads the CP number from this senior's profile. Best-effort — the
-                // verification is already saved, so a sleeping gateway must never
-                // surface an error to the staff member.
+                // Pension-approved SMS (TextBee): verification auto-activates the
+                // Local + National pension, so the senior is texted the pension
+                // approval notice (not a plain "verified" message). The server
+                // reads the CP number from this senior's profile. Best-effort —
+                // the verification is already saved, so a sleeping gateway must
+                // never surface an error to the staff member.
                 if (auth.currentUser) {
                     auth.currentUser.getIdToken().then(token => {
+                        const localAmt = Math.round(Number(pensionSettingsCache.local)) || 1000;
+                        const natAmt = Math.round(Number(pensionSettingsCache.national)) || 3000;
                         return fetch('/api/send-status-sms', {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
-                            body: JSON.stringify({ uid, type: 'account_verified' })
+                            body: JSON.stringify({
+                                uid,
+                                type: 'pension_approved',
+                                localAmount: String(localAmt),
+                                nationalAmount: String(natAmt),
+                                quarterlyTotal: String(localAmt * 3 + natAmt)
+                            })
                         });
-                    }).catch(err => console.warn('Verification SMS skipped:', err.message));
+                    }).catch(err => console.warn('Pension approval SMS skipped:', err.message));
                 }
 
                 // Mirror the verified senior to the Supabase data store (best-effort)
@@ -3403,13 +3461,18 @@ function attachButtonListeners() {
 }
 
 // ── Global function for Send Reminder ──────────────────────────────────────────
+// Writes the reminder as an in-app notification for every senior AND texts it
+// as an announcement SMS (TextBee) to every senior with a CP number on file.
+// Both sends are best-effort: the in-app write completes first, then the SMS
+// broadcast runs through /api/send-announcement-sms (broadcast:true).
 window.sendReminderToAll = async function() {
-    const msg = document.getElementById('reminderMessage').value.trim();
+    const msgEl = document.getElementById('reminderMessage');
+    const msg = (msgEl ? msgEl.value : '').trim();
     if (!msg) {
         scNotify('warning', 'Please enter a message first.');
         return;
     }
-    
+
     try {
         const usersSnap = await get(ref(db, 'users'));
         if (usersSnap.exists()) {
@@ -3429,12 +3492,62 @@ window.sendReminderToAll = async function() {
             });
             await update(ref(db), updates);
             scNotify('success', 'Reminder sent to all seniors!');
-            document.getElementById('reminderMessage').value = '';
+            if (msgEl) msgEl.value = '';
         }
     } catch (e) {
         scNotify('error', 'Failed to send reminders: ' + e.message);
     }
 }
+
+// ── Announcement / custom SMS to one senior or to everyone ───────────────────
+// Staff-composed message box -> /api/send-announcement-sms. Recipients are
+// always resolved server-side from senior profiles (users/{uid}/cpNumber).
+//   sendAnnouncementSmsToSenior(uid, message)  -> one specific senior
+//   sendAnnouncementSmsBroadcast(message)      -> every senior (broadcast:true)
+// Both are best-effort: the server answers 200 with sent/skipped counts.
+async function postAnnouncementSms(payload) {
+    const token = await getStaffIdToken();
+    const resp = await fetch('/api/send-announcement-sms', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+        body: JSON.stringify(payload)
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok || data.success === false) {
+        throw new Error((data && data.message) || `Announcement SMS failed (HTTP ${resp.status}).`);
+    }
+    return data;
+}
+
+window.sendAnnouncementSmsToSenior = async function(uid, message) {
+    const text = String(message || '').trim();
+    if (!uid || !text) {
+        scNotify('warning', 'Select a senior and enter a message first.');
+        return;
+    }
+    try {
+        const data = await postAnnouncementSms({ uid, message: text.slice(0, 300) });
+        scNotify('success', data.message || 'Announcement SMS sent.');
+    } catch (e) {
+        scNotify('error', 'Announcement SMS not sent: ' + e.message);
+    }
+};
+
+window.sendAnnouncementSmsBroadcast = async function(message) {
+    const box = document.getElementById('reminderMessage');
+    const text = String(message !== undefined ? message : (box ? box.value : '')).trim();
+    if (!text) {
+        scNotify('warning', 'Please enter a message first.');
+        return;
+    }
+    try {
+        const data = await postAnnouncementSms({ broadcast: true, message: text.slice(0, 300) });
+        scNotify('success', data.message || 'Announcement SMS broadcast sent.');
+        if (message === undefined && box) box.value = '';
+    } catch (e) {
+        scNotify('error', 'Announcement SMS broadcast failed: ' + e.message);
+    }
+};
 
 // ── Senior Appointment Requests (Checkups) Renderer ───────────────────────────
 // Lists every appointment booked by seniors (queue node) inside the Health
