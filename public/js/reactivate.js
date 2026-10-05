@@ -403,29 +403,64 @@
         }
     }
 
-    let photoAccepted = false; // senior must press "Okay, Use This Photo"
+    const submitBtn = $('submitBtn');
     const retakeBtn = $('retakeBtn');
     if (retakeBtn) retakeBtn.addEventListener('click', () => {
-        photoAccepted = false;
         lastDistance = null;
         lastSnapshot = '';
         hidePhotoPreview();
-        if ($('submitBtn')) $('submitBtn').disabled = true;
+        if (submitBtn) submitBtn.style.display = 'none';
         if ($('matchText')) $('matchText').textContent = '';
         if ($('matchFill')) $('matchFill').style.width = '0';
+        if ($('scanBtn')) $('scanBtn').disabled = false;
         setMsg('msg2', 'info', 'Photo discarded. Look straight at the camera with good light, then press Scan My Face again.');
     });
-    const okPhotoBtn = $('okPhotoBtn');
-    if (okPhotoBtn) okPhotoBtn.addEventListener('click', () => {
-        if (!lastSnapshot || lastDistance === null || lastDistance > MATCH_THRESHOLD) {
+
+    // True when the server already holds a request for this senior. A dropped
+    // or timed-out response can hide a request the server already stored, so we
+    // check before telling the senior to start over.
+    async function reactivationRequestAlreadyStored() {
+        if (!seniorId) return false;
+        try {
+            const res = await fetch('/api/reactivation/status?seniorId=' + encodeURIComponent(seniorId));
+            const data = await res.json().catch(() => ({}));
+            return !!(res.ok && data.success && data.status && data.status !== 'None');
+        } catch (e) { return false; }
+    }
+
+    // Sends the matched scan to OSCA staff. Called automatically the moment the
+    // face matches, and again from the retry button if that send failed.
+    async function sendReactivationRequest() {
+        if (!token || lastDistance === null || !lastSnapshot) {
             setMsg('msg2', 'err', 'Please scan your face successfully first.');
-            return;
+            return false;
         }
-        photoAccepted = true;
-        hidePhotoPreview();
-        if ($('submitBtn')) $('submitBtn').disabled = false;
-        setMsg('msg2', 'ok', 'Photo accepted! Now press "Send Reactivation Request" to send it to OSCA staff.');
-    });
+        if (submitBtn) submitBtn.style.display = 'none';
+        setMsg('msg2', 'info', 'Sending your face scan to OSCA staff…');
+        try {
+            await postJson('/api/reactivation/submit', { token, distance: lastDistance, liveImage: lastSnapshot });
+        } catch (err) {
+            console.error('sendReactivationRequest error:', err);
+            // The request may have been stored even though the reply never
+            // reached us — in that case staff already see it, so move on.
+            if (await reactivationRequestAlreadyStored()) {
+                if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
+                $('scanBtn').disabled = true;
+                enterWaitingStep();
+                return true;
+            }
+            setMsg('msg2', 'err', (err && err.message) || 'Could not send your request. Please try again.');
+            if (submitBtn) {
+                submitBtn.style.display = 'block';
+                setBusy(submitBtn, false, 'Retry Sending');
+            }
+            return false;
+        }
+        if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
+        $('scanBtn').disabled = true;
+        enterWaitingStep();
+        return true;
+    }
 
     const scanBtn = $('scanBtn');
     if (scanBtn) scanBtn.addEventListener('click', async () => {
@@ -443,8 +478,7 @@
         setMsg('msg2', 'info', 'Scanning your face… please stay still and look at the camera.');
         $('matchText').textContent = '';
         $('matchFill').style.width = '0';
-        $('submitBtn').disabled = true;
-        photoAccepted = false;
+        if (submitBtn) submitBtn.style.display = 'none';
         hidePhotoPreview();
         lastDistance = null;
 
@@ -496,7 +530,7 @@
             const pct = formatPercent(distance);
             $('matchFill').style.width = pct;
             if (distance <= MATCH_THRESHOLD) {
-                $('matchText').textContent = 'Match: ' + pct + ' — look at your photo below.';
+                $('matchText').textContent = 'Match: ' + pct + ' — sending to OSCA staff.';
                 // Snapshot the live frame for staff review. Never mirrored,
                 // so the preview, the saved photo, and the camera all match.
                 const canvas = document.createElement('canvas');
@@ -505,11 +539,12 @@
                 const ctx = canvas.getContext('2d');
                 ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
                 lastSnapshot = canvas.toDataURL('image/jpeg', 0.75);
-                // Show the senior their own photo first — they choose Retake
-                // or Okay, Use This Photo. Submit stays locked until Okay.
+                // Show the senior their own photo, then send it right away.
+                // A successful scan must never depend on the senior finding a
+                // second button — that is how requests went missing before.
                 showPhotoPreview(lastSnapshot, 'Face matched your registration photo (' + pct + ').');
-                setMsg('msg2', 'info', 'We found your face (' + pct + '). Is this photo okay? Press "Okay, Use This Photo" or "Retake".');
-                $('submitBtn').disabled = true;
+                setMsg('msg2', 'info', 'We found your face (' + pct + '). Sending your request to OSCA staff now…');
+                await sendReactivationRequest();
             } else {
                 $('matchText').textContent = 'Match: ' + pct + ' — too low, please try again.';
                 setMsg('msg2', 'err', 'Face did not match (' + pct + '). Face the camera clearly with good light and try again — or visit the OSCA office for help.');
@@ -522,28 +557,12 @@
         }
     });
 
-    const submitBtn = $('submitBtn');
+    // The request is sent automatically on a successful scan. This button is
+// therefore only a retry, and stays hidden until a send actually fails.
     if (submitBtn) submitBtn.addEventListener('click', async () => {
-        if (!token || lastDistance === null || !lastSnapshot) {
-            setMsg('msg2', 'err', 'Please scan your face successfully first.');
-            return;
-        }
-        if (!photoAccepted) {
-            setMsg('msg2', 'err', 'Please press "Okay, Use This Photo" first to confirm your scanned photo.');
-            showPhotoPreview(lastSnapshot, '');
-            return;
-        }
-        setBusy(submitBtn, true);
-        try {
-            await postJson('/api/reactivation/submit', { token, distance: lastDistance, liveImage: lastSnapshot });
-            if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
-            $('scanBtn').disabled = true;
-            enterWaitingStep();
-        } catch (err) {
-            setMsg('msg2', 'err', err.message);
-            setBusy(submitBtn, false, 'Send Reactivation Request');
-            submitBtn.disabled = !(lastDistance !== null && lastDistance <= MATCH_THRESHOLD);
-        }
+        if (submitBtn.disabled) return;
+        setBusy(submitBtn, true, 'Sending…');
+        await sendReactivationRequest();
     });
 
     // ---- Step 3: wait for OSCA staff review (auto-updating screen) ----
