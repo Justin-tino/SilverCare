@@ -31,6 +31,43 @@ function extract(name) {
     throw new Error('unbalanced braces in: ' + name);
 }
 
+// Shared brace walker: `fnStart` is the index of a `function` keyword (named or
+// anonymous). Preserves a leading "async", skips the parameter list, then
+// balances the body braces to return the whole function as valid JavaScript.
+function sliceFn(source, fnStart, name) {
+    const asyncPrefix = source.slice(Math.max(0, fnStart - 6), fnStart);
+    const start = /\basync\s$/.test(asyncPrefix) ? fnStart - 6 : fnStart;
+    let paren = 0, bodyStart = -1;
+    for (let i = source.indexOf('(', fnStart); i < source.length; i++) {
+        if (source[i] === '(') paren++;
+        else if (source[i] === ')') { paren--; if (paren === 0) { bodyStart = source.indexOf('{', i); break; } }
+    }
+    if (bodyStart === -1) throw new Error('no body found for: ' + name);
+    let depth = 0;
+    for (let j = bodyStart; j < source.length; j++) {
+        if (source[j] === '{') depth++;
+        else if (source[j] === '}') { depth--; if (depth === 0) return source.slice(start, j + 1); }
+    }
+    throw new Error('unbalanced braces in: ' + name);
+}
+
+// Named helper living in a client file (e.g. employee.js), not in server.js.
+function extractNamed(source, name) {
+    const fnStart = source.indexOf('function ' + name + '(');
+    if (fnStart === -1) throw new Error('not found: ' + name);
+    return sliceFn(source, fnStart, name);
+}
+
+// Client handlers are anonymous assignments (`window.foo = async function() {…}`),
+// so they are anchored on the assignment instead of a named declaration. Only the
+// `window.foo = ` binding is re-added — sliceFn already carries the `async`
+// prefix, so re-slicing from the anchor would emit "async async".
+function extractWindowFn(source, name) {
+    const at = source.indexOf('window.' + name + ' = ');
+    if (at === -1) throw new Error('not found: ' + name);
+    return 'window.' + name + ' = ' + sliceFn(source, source.indexOf('function', at), name);
+}
+
 const typesStart = src.indexOf('const SMS_NOTIFICATION_TYPES');
 const typesEnd = src.indexOf('];', typesStart) + 2;
 const code = [
@@ -261,8 +298,91 @@ async function verifyRequestContract() {
     check('no network call for a bad number', networkHits, 0);
 }
 
+// --- the staff reminder composer must deliver by SMS, not just in-app ---
+// Regression guard: "Send to everyone" and "Select seniors…" used to write ONLY
+// the in-app notification, so a senior who never opened the portal was never
+// reminded. These checks run the REAL handlers out of public/js/employee.js
+// with Firebase and the SMS route stubbed, and assert the SMS leg fires.
+async function verifyReminderComposer() {
+    const emp = fs.readFileSync(path.join(__dirname, '..', 'public', 'js', 'employee.js'), 'utf8');
+    const smsOutcomeLine = new Function(extractNamed(emp, 'smsOutcomeLine') + '; return smsOutcomeLine;')();
+
+    checkTrue('employee.js posts reminders to the SMS route',
+        emp.includes("postAnnouncementSms({ broadcast: true, message: msg })"));
+    checkTrue('employee.js posts targeted reminders to the SMS route',
+        emp.includes('postAnnouncementSms({ uids: selectedUids, message: msg })'));
+
+    const REMINDER = 'Bring your QR Digital ID on Friday.';
+
+    // Minimal DOM the two handlers touch, plus a 2-senior + 1-staff roster.
+    const makeDoc = (checkboxes) => ({
+        getElementById: (id) => {
+            if (id === 'reminderMessage') return { value: REMINDER };
+            if (id === 'selectUserModal') return { style: {} };
+            if (id === 'selectAllSeniorsCheckbox') return { checked: false };
+            return null;
+        },
+        querySelector: (sel) => (sel === '#selectUserModal .btn' ? { innerHTML: 'Send Reminder', disabled: false } : null),
+        querySelectorAll: (sel) => (sel === '.senior-reminder-checkbox:checked' ? checkboxes : [])
+    });
+    const usersSnap = {
+        exists: () => true,
+        forEach: (cb) => {
+            cb({ key: 'senior-1', val: () => ({ role: 'senior' }) });
+            cb({ key: 'senior-2', val: () => ({ role: 'senior' }) });
+            cb({ key: 'staff-1', val: () => ({ role: 'employee' }) });
+        }
+    };
+
+    // Runs a real handler out of employee.js against stubbed Firebase + a
+    // captured SMS route. Returns the notices raised and the SMS payloads sent.
+    function run(handler, { boxes = [], smsImpl } = {}) {
+        const notices = [], smsCalls = [];
+        const deps = {
+            window: {},
+            document: makeDoc(boxes),
+            scNotify: (t, m) => notices.push([t, m]),
+            get: async () => usersSnap,
+            ref: p => p,
+            db: 'db',
+            update: async () => {},
+            postAnnouncementSms: smsImpl || (async payload => { smsCalls.push(payload); return { success: true, sent: 2, skipped: 1, total: 3 }; }),
+            smsOutcomeLine
+        };
+        const names = Object.keys(deps);
+        const fn = new Function(...names,
+            extractWindowFn(emp, handler) + '; return window.' + handler + ';')(...names.map(n => deps[n]));
+        return fn().then(() => ({ notices, smsCalls }));
+    }
+
+    // 1) "Send to everyone" -> in-app write AND a broadcast SMS.
+    const all = await run('sendReminderToAll');
+    check('send-to-everyone -> SMS route called once', all.smsCalls.length, 1);
+    check('send-to-everyone -> broadcast flag set', all.smsCalls[0].broadcast, true);
+    check('send-to-everyone -> reminder text sent', all.smsCalls[0].message, REMINDER);
+    checkTrue('send-to-everyone -> toast reports the SMS count',
+        all.notices.some(n => n[0] === 'success' && /SMS sent to 2 seniors, 1 skipped/.test(n[1])));
+
+    // 2) A sleeping gateway must NOT turn a delivered reminder into an error.
+    const offline = await run('sendReminderToAll', { smsImpl: async () => { throw new Error('gateway offline'); } });
+    checkTrue('gateway down -> still reported as success', offline.notices.some(n => n[0] === 'success'));
+    checkTrue('gateway down -> staff told SMS was not sent',
+        offline.notices.some(n => /SMS could not be sent/.test(n[1])));
+    checkTrue('gateway down -> no error toast', !offline.notices.some(n => n[0] === 'error'));
+
+    // 3) "Select seniors…" -> SMS goes to exactly the ticked seniors.
+    const sel = await run('sendSelectedReminders', { boxes: [{ value: 'senior-1' }, { value: 'senior-2' }] });
+    check('select-seniors -> SMS route called once', sel.smsCalls.length, 1);
+    check('select-seniors -> only the selected seniors are texted',
+        JSON.stringify(sel.smsCalls[0].uids), JSON.stringify(['senior-1', 'senior-2']));
+    check('select-seniors -> reminder text sent', sel.smsCalls[0].message, REMINDER);
+    checkTrue('select-seniors -> toast reports the SMS count',
+        sel.notices.some(n => n[0] === 'success' && /SMS sent to 2 seniors/.test(n[1])));
+}
+
 (async () => {
     await verifyRequestContract();
+    await verifyReminderComposer();
     console.log('\n' + pass + ' passed, ' + fail + ' failed');
     process.exit(fail === 0 ? 0 : 1);
 })();

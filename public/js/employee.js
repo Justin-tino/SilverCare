@@ -3476,10 +3476,12 @@ function attachButtonListeners() {
 }
 
 // ── Global function for Send Reminder ──────────────────────────────────────────
-// Writes the reminder as an in-app notification for every senior AND texts it
-// as an announcement SMS (TextBee) to every senior with a CP number on file.
-// Both sends are best-effort: the in-app write completes first, then the SMS
-// broadcast runs through /api/send-announcement-sms (broadcast:true).
+// Two-legged delivery, so a reminder is never limited to the portal:
+//   1) in-app notification  -> users/{uid}/notifications (every senior)
+//   2) SMS (TextBee)        -> /api/send-announcement-sms, one text per senior
+//                             whose profile carries a usable CP number.
+// Leg 1 completes first; leg 2 is best-effort and reports how many were actually
+// texted. Recipients are always resolved server-side from senior profiles.
 window.sendReminderToAll = async function() {
     const msgEl = document.getElementById('reminderMessage');
     const msg = (msgEl ? msgEl.value : '').trim();
@@ -3506,7 +3508,21 @@ window.sendReminderToAll = async function() {
                 }
             });
             await update(ref(db), updates);
-            scNotify('success', 'Reminder sent to all seniors!');
+
+            // Second leg of the same reminder: the identical text also goes out
+            // as an SMS to every senior with a CP number on file, so seniors who
+            // never open the portal still receive it. Recipients are resolved
+            // server-side from senior profiles, never from this request.
+            // Best-effort by design — the in-app write above already succeeded,
+            // so a sleeping gateway is reported, never treated as a failure.
+            let smsNote = 'SMS could not be sent.';
+            try {
+                smsNote = smsOutcomeLine(await postAnnouncementSms({ broadcast: true, message: msg }));
+            } catch (smsErr) {
+                console.warn('Reminder SMS broadcast skipped:', smsErr.message);
+            }
+
+            scNotify('success', `Reminder sent to all seniors in-app. ${smsNote}`);
             if (msgEl) msgEl.value = '';
         }
     } catch (e) {
@@ -3532,6 +3548,18 @@ async function postAnnouncementSms(payload) {
         throw new Error((data && data.message) || `Announcement SMS failed (HTTP ${resp.status}).`);
     }
     return data;
+}
+
+// Staff-facing one-liner for an /api/send-announcement-sms reply. The route
+// answers 200 even when the Android gateway is asleep or a senior has no CP
+// number, so the sent/skipped split is the only honest signal of how many
+// seniors were actually texted.
+function smsOutcomeLine(data) {
+    const sent = Number(data && data.sent) || 0;
+    const skipped = Number(data && data.skipped) || 0;
+    let line = `SMS sent to ${sent} senior${sent === 1 ? '' : 's'}`;
+    if (skipped) line += `, ${skipped} skipped (no CP number on file or gateway offline)`;
+    return line;
 }
 
 window.sendAnnouncementSmsToSenior = async function(uid, message) {
@@ -3786,7 +3814,8 @@ window.sendSelectedReminders = async function() {
     try {
         const updates = {};
         const now = Date.now();
-        
+        const selectedUids = Array.from(checkboxes).map(cb => cb.value).filter(Boolean);
+
         checkboxes.forEach(cb => {
             const uid = cb.value;
             const notifKey = 'notif_' + now + '_' + Math.floor(Math.random()*1000);
@@ -3798,8 +3827,18 @@ window.sendSelectedReminders = async function() {
         });
 
         await update(ref(db), updates);
-        
-        scNotify('success', `Direct reminder sent successfully to ${checkboxes.length} seniors!`);
+
+        // Same second leg as "Send to everyone": text the very same seniors
+        // through /api/send-announcement-sms (uids array) so a targeted reminder
+        // reaches them by SMS too. Best-effort — the in-app write already landed.
+        let smsNote = 'SMS could not be sent.';
+        try {
+            smsNote = smsOutcomeLine(await postAnnouncementSms({ uids: selectedUids, message: msg }));
+        } catch (smsErr) {
+            console.warn('Reminder SMS skipped:', smsErr.message);
+        }
+
+        scNotify('success', `Direct reminder sent successfully to ${selectedUids.length} seniors in-app. ${smsNote}`);
         document.getElementById('reminderMessage').value = '';
         document.getElementById('selectUserModal').style.display = 'none';
         
