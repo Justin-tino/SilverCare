@@ -45,7 +45,11 @@
               var _l = Number(u.pensionLocalAmount) || Number(u.pensionAmount) || 0;
               var _n = Number(u.pensionNationalAmount) || 0;
               var _q = _l * 3 + _n;
-              return _q > 0 ? ('Local ₱' + _l.toLocaleString() + '/mo + National ₱' + _n.toLocaleString() + '/qtr') : '-';
+              // Senior may have Local only, National only, or both.
+              var _parts = [];
+              if (_l > 0) _parts.push('Local ₱' + _l.toLocaleString() + '/mo');
+              if (_n > 0) _parts.push('National ₱' + _n.toLocaleString() + '/qtr');
+              return _q > 0 ? _parts.join(' + ') : '-';
             })(),
             ref: b.refNumber || b.reference || '-', when: b.approvedAt || b.createdAt || u.lastPensionMonth || ''
           });
@@ -133,7 +137,7 @@
       var _l = Number(u.pensionLocalAmount) || Number(u.pensionAmount) || 0;
       var _n = Number(u.pensionNationalAmount) || 0;
       var _q = _l * 3 + _n;
-      if (_l > 0 && _n > 0) { pensionTotal += _q; withPension++; }
+      if (_l > 0 || _n > 0) { pensionTotal += _q; withPension++; }
     });
     var assistanceTotal = 0, claimedCount = 0;
     Object.values(claims).forEach(function (c) {
@@ -221,7 +225,7 @@
         if (String(u.lifeStatus || '') === 'Deceased' || String(u.status || '') === 'Deceased' || u.pensionSuspended) return;
         var _l = Number(u.pensionLocalAmount) || Number(u.pensionAmount) || 0;
         var _n = Number(u.pensionNationalAmount) || 0;
-        if (_l > 0 && _n > 0) L.push([
+        if (_l > 0 || _n > 0) L.push([
           u.name || 'Senior', u.seniorId || 'N/A', fmtPhp(_l), fmtPhp(_n), fmtPhp(_l * 3 + _n),
           u.pensionSetAt ? new Date(Number(u.pensionSetAt)).toLocaleDateString() : '',
           u.pensionSetBy || ''
@@ -298,7 +302,12 @@
         var _dec = String(u.lifeStatus || '') === 'Deceased' || String(u.status || '') === 'Deceased' || u.pensionSuspended;
         var _l = Number(u.pensionLocalAmount) || Number(u.pensionAmount) || 0;
         var _n = Number(u.pensionNationalAmount) || 0;
-        if (!_dec && _l > 0 && _n > 0) rows.push(['Pension-configured', u.name || '', u.seniorId || '', 'Local monthly + National quarterly', 'Local PHP ' + _l.toLocaleString() + ' + National PHP ' + _n.toLocaleString() + ' (Qtr PHP ' + (_l * 3 + _n).toLocaleString() + ')', u.pensionSetBy || '', u.pensionSetAt ? new Date(Number(u.pensionSetAt)).toLocaleDateString() : '']);
+        if (!_dec && (_l > 0 || _n > 0)) {
+          var _p = [];
+          if (_l > 0) _p.push('Local PHP ' + _l.toLocaleString() + '/month');
+          if (_n > 0) _p.push('National PHP ' + _n.toLocaleString() + '/quarter');
+          rows.push(['Pension-configured', u.name || '', u.seniorId || '', _p.join(' + '), _p.join(' + ') + ' (Qtr PHP ' + (_l * 3 + _n).toLocaleString() + ')', u.pensionSetBy || '', u.pensionSetAt ? new Date(Number(u.pensionSetAt)).toLocaleDateString() : '']);
+        }
         var benefits = (u.benefits && typeof u.benefits === 'object') ? Object.values(u.benefits) : [];
         // Pension payouts of archived Deceased accounts stay in audit history
         // (claimed / paid records) but must never reappear as live pension rows.

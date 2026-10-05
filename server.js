@@ -418,8 +418,19 @@ function buildStatusSms({ type, name, amount, localAmount, nationalAmount, quart
     const tail = ' -OSCA Magalang';
 
     switch (type) {
-        case 'pension_approved':
-            return `SilverCare OSCA: Good news ${who}! Your pension is APPROVED - Local ${php(localAmount || amount)} per month + National ${php(nationalAmount)} per quarter, quarterly total ${php(quarterlyTotal || amount)}. Bring your OSCA ID when claiming.${tail}`;
+        case 'pension_approved': {
+            // A senior may be granted Local only, National only, or both.
+            const _l = peso(localAmount), _n = peso(nationalAmount);
+            const parts = [];
+            if (_l > 0) parts.push(`Local ${php(_l)} per month`);
+            if (_n > 0) parts.push(`National ${php(_n)} per quarter`);
+            const _q = peso(quarterlyTotal || amount) || (_l * 3 + _n);
+            // Never announce a PHP 0 amount; fall back to a plain approval line.
+            const detail = parts.length
+                ? `${parts.join(' + ')}, quarterly total ${php(_q)}`
+                : 'your pension setup is now active';
+            return `SilverCare OSCA: Good news ${who}! Your pension is APPROVED - ${detail}. Bring your OSCA ID when claiming.${tail}`;
+        }
 
         case 'pension_releasing':
             return `SilverCare OSCA: ${who}, your pension payout of ${php(amount)} is now being RELEASED${whenPeriod}. Wait for our release confirmation before going to the OSCA office.${repo}${tail}`;
@@ -742,21 +753,37 @@ app.post('/api/send-status-email', requireAuth, requireRole('admin', 'employee')
     let sectionHtml = '';
 
     if (type === 'pension_approved') {
+        // A senior may receive Local only, National only, or both. Never
+        // print a fabricated amount when a component is 0 or missing.
+        const _peso = v => Number(String(v === null || v === undefined ? '' : v).replace(/[^\d.]/g, '')) || 0;
+        const _l = _peso(localAmount), _n = _peso(nationalAmount);
+        const _parts = [];
+        if (_l > 0) _parts.push(`Local pension: PHP ${_l.toLocaleString()} per month`);
+        if (_n > 0) _parts.push(`National pension: PHP ${_n.toLocaleString()} per quarter`);
+        const _breakdown = _parts.length ? _parts.join('. ') : 'Your pension setup';
+        const _total = _peso(quarterlyTotal) || _peso(amount) || (_l * 3 + _n);
+        const _lines = [];
+        if (_l > 0) _lines.push(`<p style="font-size: 1.05rem; color: #166534; margin: 4px 0; font-weight: 700;">Local: PHP ${_l.toLocaleString()} / month</p>`);
+        if (_n > 0) _lines.push(`<p style="font-size: 1.05rem; color: #1d4ed8; margin: 4px 0; font-weight: 700;">National: PHP ${_n.toLocaleString()} / quarter</p>`);
+        // Release schedule bullets must match the granted components only.
+        const _schedule = [];
+        if (_l > 0) _schedule.push('Your Local pension is released monthly.');
+        if (_n > 0) _schedule.push('Your National pension is released every three months.');
+        const _subLabel = _l > 0 && _n > 0 ? 'Local + National' : (_l > 0 ? 'Local' : 'National');
         title = 'Pension Payout Approved';
-        subtitle = 'Official Local + National Pension Disbursement Notice';
+        subtitle = `Official ${_subLabel} Pension Disbursement Notice`;
         statusTitle = 'Payout Status: Approved & Active';
-        statusText = `Your dual pension setup has been officially approved and activated by the OSCA administration. Local pension: PHP ${localAmount || '1,000'} per month. National pension: PHP ${nationalAmount || '3,000'} per quarter. Your quarterly pension total is PHP ${quarterlyTotal || amount || '6,000'}.`;
+        statusText = `Your pension setup has been officially approved and activated by the OSCA administration. ${_breakdown}. Your quarterly pension total is PHP ${_total.toLocaleString()}.`;
         sectionHtml = `
             <div style="background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 12px; padding: 20px; text-align: center; margin: 25px 0;">
-                <p style="color: #166534; font-size: 0.9rem; margin: 0 0 8px 0; font-weight: 600;">Approved Dual Pension Setup</p>
-                <p style="font-size: 1.05rem; color: #166534; margin: 4px 0; font-weight: 700;">Local: PHP ${localAmount || '1,000'} / month</p>
-                <p style="font-size: 1.05rem; color: #1d4ed8; margin: 4px 0; font-weight: 700;">National: PHP ${nationalAmount || '3,000'} / quarter</p>
-                <p style="font-size: 1.35rem; color: #15803d; margin: 10px 0 0; font-weight: 800;">Quarterly total: PHP ${quarterlyTotal || amount || '6,000'}</p>
+                <p style="color: #166534; font-size: 0.9rem; margin: 0 0 8px 0; font-weight: 600;">Approved Pension Setup</p>
+                ${_lines.join('\n                ')}
+                <p style="font-size: 1.35rem; color: #15803d; margin: 10px 0 0; font-weight: 800;">Quarterly total: PHP ${_total.toLocaleString()}</p>
             </div>
             <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 25px; margin-top: 20px;">
                 <h3 style="color: #0f172a; margin-top: 0; font-size: 1.05rem;">What Happens Next:</h3>
                 <ul style="color: #475569; padding-left: 20px; font-size: 0.95rem; line-height: 1.6; margin-bottom: 0;">
-                    <li>Your Local pension is released monthly and your National pension is released every three months.</li>
+                    <li>${_schedule.join(' ')}</li>
                     <li>Each pension payout will be announced through your SilverCare portal notifications and e-mail.</li>
                     <li>To receive a payout, present your physical <strong>OSCA Identification Card</strong> at the designated OSCA Magalang Distribution Center.</li>
                     <li>For questions about the release schedule, please visit or contact the OSCA Magalang office.</li>
@@ -1695,12 +1722,23 @@ app.post('/api/register-senior', requireAuth, requireRole('admin', 'employee'), 
 
         // Pension approval SMS (TextBee): a walk-in account is created already
         // VERIFIED with an auto-activated pension, so the senior is told about
-        // the pension approval right away. Fire-and-forget — the gateway is
+        // the pension approval right away. Read the live global amounts so the
+        // notice matches what was actually applied (never announce a pension
+        // the senior is not receiving). Fire-and-forget — the gateway is
         // best-effort and must never delay or break the creation.
+        let smsLocal = '1000', smsNational = '3000';
+        try {
+            const settingsSnap = await admin.database().ref('pensionSettings').once('value');
+            const s = settingsSnap.exists() ? (settingsSnap.val() || {}) : {};
+            smsLocal = String(Math.round(Number(s.local)) || 1000);
+            smsNational = String(Math.round(Number(s.national)) || 3000);
+        } catch (settingsErr) {
+            console.warn('Pension settings unavailable for walk-in SMS, using defaults:', settingsErr.message);
+        }
         notifySeniorSms(userRecord.uid, 'pension_approved', {
-            localAmount: '1000',
-            nationalAmount: '3000',
-            quarterlyTotal: '6000'
+            localAmount: smsLocal,
+            nationalAmount: smsNational,
+            quarterlyTotal: String((Number(smsLocal) || 0) * 3 + (Number(smsNational) || 0))
         }).catch(err => console.warn('Pension approval SMS skipped:', err.message));
 
         res.json({ success: true, message: 'Senior citizen account created successfully.', uid: userRecord.uid });

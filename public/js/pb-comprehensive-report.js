@@ -31,7 +31,8 @@
     return (seniorLocalPension(u) * 3) + seniorNationalPension(u);
   }
   function isSeniorPensionEnrolled(u) {
-    return seniorLocalPension(u) > 0 && seniorNationalPension(u) > 0;
+    // Local only, National only, or both — any component > 0 counts.
+    return seniorLocalPension(u) > 0 || seniorNationalPension(u) > 0;
   }
   function seniorStatus(u) { return String((u && (u.lifeStatus || u.status)) || 'Active'); }
   function isSenior(u) { return !!u && u.role === 'senior'; }

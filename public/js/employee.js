@@ -2223,8 +2223,14 @@ function sendSeniorPensionStatus(seniorsArr, uid, seniorName, pension, type) {
         const quarterly = Math.max(0, Number(p.quarterlyTotal) || (local * 3 + national));
         // Optional payout window (e.g. "2026-09") used by the releasing/released notices.
         const smsPeriod = typeof p.period === 'string' ? p.period : '';
-        const amountLabel = quarterly > 0
-            ? `Local PHP ${local.toLocaleString()}/month + National PHP ${national.toLocaleString()}/quarter (quarterly total PHP ${quarterly.toLocaleString()})`
+        // A senior may receive Local only, National only, or both — only
+        // mention the components that were actually granted.
+        const amountParts = [
+            local > 0 ? `Local PHP ${local.toLocaleString()}/month` : '',
+            national > 0 ? `National PHP ${national.toLocaleString()}/quarter` : ''
+        ].filter(Boolean);
+        const amountLabel = amountParts.length
+            ? `${amountParts.join(' + ')} (quarterly total PHP ${quarterly.toLocaleString()})`
             : 'your pension setup';
         // In-app wording per decision — the e-mail and SMS use their own templates.
         const pensionWindow = smsPeriod ? ` for ${smsPeriod}` : '';
@@ -2233,7 +2239,7 @@ function sendSeniorPensionStatus(seniorsArr, uid, seniorName, pension, type) {
             : (type === 'pension_released'
                 ? { title: 'Pension Released ✓', description: `Your pension payout${pensionWindow} has been released. Present your OSCA ID or QR Digital ID at the OSCA Magalang office to claim.` }
                 : (type === 'pension_approved'
-                    ? { title: 'Pension Setup Approved', description: `Your dual pension setup has been approved by OSCA staff: ${amountLabel}. Please check your email and SMS for the official notice.` }
+                    ? { title: 'Pension Setup Approved', description: `Your pension setup has been approved by OSCA staff: ${amountLabel}. Please check your email and SMS for the official notice.` }
                     : { title: 'Pension Setup Removed', description: 'Your Local/National pension setup was removed by OSCA staff. Please visit the OSCA Magalang office for assistance.' }));
         update(ref(db, `users/${uid}/notifications/notif_${Date.now()}`), {
             title: notice.title,
@@ -2305,7 +2311,9 @@ function getNationalPensionOf(u) {
     if (Number(u.pensionNationalAmount) > 0) return Number(u.pensionNationalAmount);
     return 0;
 }
-function hasPension(u) { return getLocalPensionOf(u) > 0 && getNationalPensionOf(u) > 0; }
+// A senior does NOT need both pensions — some qualify for Local only,
+// National only, or both. Any component > 0 counts as "pension granted".
+function hasPension(u) { return getLocalPensionOf(u) > 0 || getNationalPensionOf(u) > 0; }
 function quarterTotalOf(u) { return getLocalPensionOf(u) * 3 + getNationalPensionOf(u); }
 function refreshPensionSettingsPreview() {
     const li = document.getElementById('pensionLocalInput');
@@ -2459,7 +2467,7 @@ function renderPensionSetup(usersData) {
     if (awaiting.length === 0) {
         setupContainer.innerHTML = `
             <div style="text-align:center; color:#71717a; padding:20px; border:1px dashed #d4d4d8; border-radius:4px;">
-                All verified senior accounts already have Local + National pension.
+                All verified senior accounts already have a Local and/or National pension.
             </div>`;
     } else {
         setupContainer.innerHTML = `
@@ -2531,8 +2539,8 @@ function renderPensionSetup(usersData) {
                             <td style="padding:10px; font-weight:600; color:#1e293b;">${escHtml(s.name || 'Senior Citizen')}</td>
                             <td style="padding:10px; color:#3f3f46;">${escHtml(s.seniorId || 'N/A')}</td>
                             <td style="padding:10px;">${priorityPillHtml(s._prio)}</td>
-                            <td style="padding:10px; font-weight:700; color:#166534;">₱${Number(_l).toLocaleString()}</td>
-                            <td style="padding:10px; font-weight:700; color:#1d4ed8;">₱${Number(_n).toLocaleString()}</td>
+                            <td style="padding:10px; font-weight:700; color:${_l > 0 ? '#166534' : '#a1a1aa'};">${_l > 0 ? '₱' + Number(_l).toLocaleString() : '—'}</td>
+                            <td style="padding:10px; font-weight:700; color:${_n > 0 ? '#1d4ed8' : '#a1a1aa'};">${_n > 0 ? '₱' + Number(_n).toLocaleString() : '—'}</td>
                             <td style="padding:10px; font-weight:800; color:#1e293b;">₱${Number(_q).toLocaleString()}</td>
                             <td style="padding:10px; color:#3f3f46;">${s.pensionSetAt ? new Date(Number(s.pensionSetAt)).toLocaleDateString() : '—'}</td>
                             <td style="padding:10px; color:#3f3f46;">${s.pensionSetBy ? escHtml(s.pensionSetBy) : '—'}</td>
@@ -2558,15 +2566,22 @@ function renderPensionSetup(usersData) {
             const nationalInput = row ? row.querySelector('.pension-grant-national') : null;
             const local = Math.round(Number(localInput ? localInput.value : pensionSettingsCache.local)) || 0;
             const national = Math.round(Number(nationalInput ? nationalInput.value : pensionSettingsCache.national)) || 0;
-            if (!(local > 0) || !(national > 0)) {
-                scNotify('error', 'Please enter a valid pension amount — both Local (₱/month) and National (₱/quarter) must be greater than 0.');
+            // At least ONE pension component must be granted. A senior may be
+            // eligible for Local only, National only, or both — never require both.
+            if (!(local > 0) && !(national > 0)) {
+                scNotify('error', 'Please enter a valid pension amount — at least one of Local (₱/month) or National (₱/quarter) must be greater than 0.');
                 const focusEl = !(local > 0) ? (localInput || nationalInput) : nationalInput;
                 if (focusEl) focusEl.focus();
                 return;
             }
             const qtr = local * 3 + national;
+            // Describe only what is actually being granted (one or both).
+            const grantParts = [
+                local > 0 ? `Local ₱${local.toLocaleString()}/month` : '',
+                national > 0 ? `National ₱${national.toLocaleString()}/quarter` : ''
+            ].filter(Boolean).join(' + ');
             const actorName = (window.currentStaffName || '').trim() || 'OSCA Staff';
-            confirmAction(`Grant pension to ${seniorName}? Local ₱${local.toLocaleString()}/month + National ₱${national.toLocaleString()}/quarter.`, async () => {
+            confirmAction(`Grant pension to ${seniorName}? ${grantParts}.`, async () => {
                 try {
                     // Deceased gate: an archived Deceased senior must never be
                     // granted pension again (re-check the live record in case it
@@ -2589,7 +2604,7 @@ function renderPensionSetup(usersData) {
                         pensionSetBy: actorName
                     });
                     logPensionAudit('PENSION_SET', uid, seniorName, qtr,
-                        `Granted pension to ${seniorName}: Local ₱${local.toLocaleString()}/mo + National ₱${national.toLocaleString()}/qtr`);
+                        `Granted pension to ${seniorName}: ${grantParts}`);
                     scNotify('success', `Pension granted to ${seniorName} (quarterly total ₱${qtr.toLocaleString()}).`);
                     sendSeniorPensionStatus(seniors, uid, seniorName, { localAmount: local, nationalAmount: national, quarterlyTotal: qtr }, 'pension_approved');
                 } catch (err) {
