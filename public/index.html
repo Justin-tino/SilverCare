@@ -65,7 +65,10 @@
                 
                 <div class="input-group">
                     <i class="fas fa-lock"></i>
-                    <input type="password" id="password" name="user_login_password" placeholder="Password" autocomplete="new-password" required>
+                    <input type="password" id="password" name="user_login_password" placeholder="Password" autocomplete="new-password" style="padding-right: 45px;" required>
+                    <button type="button" id="togglePassword" aria-label="Show password" title="Show password" style="position: absolute; right: 8px; top: 50%; transform: translateY(-50%); background: none; border: none; color: #94a3b8; cursor: pointer; font-size: 1rem; padding: 6px;">
+                        <i class="fas fa-eye" style="position: static; transform: none;"></i>
+                    </button>
                 </div>
                 
                 <div style="text-align: right; margin: -8px 0 15px; display: none;" id="forgotPwWrapper">
@@ -226,9 +229,16 @@
             const emailInput = document.getElementById('email');
             const passInput = document.getElementById('password');
             
-            // Clear inputs
+            // Clear inputs + reset password visibility
             emailInput.value = '';
             passInput.value = '';
+            passInput.type = 'password';
+            const toggleBtn = document.getElementById('togglePassword');
+            if (toggleBtn) {
+                toggleBtn.innerHTML = '<i class="fas fa-eye" style="position: static; transform: none;"></i>';
+                toggleBtn.setAttribute('aria-label', 'Show password');
+                toggleBtn.title = 'Show password';
+            }
             
             if (role === 'admin') {
                 header.innerHTML = '<i class="fas fa-shield-alt" style="font-size:3rem; color:#3b82f6; margin-bottom:10px;"></i><h3>Admin Login</h3>';
@@ -287,6 +297,22 @@
             }
 
             if (backBtn) backBtn.addEventListener('click', showRoles);
+        })();
+
+        // Show / hide password toggle (one shared login form for all roles).
+        (function initPasswordToggle() {
+            const toggleBtn = document.getElementById('togglePassword');
+            const passInput = document.getElementById('password');
+            if (!toggleBtn || !passInput || toggleBtn.dataset.wired) return;
+            toggleBtn.dataset.wired = '1';
+            toggleBtn.addEventListener('click', () => {
+                const show = passInput.type === 'password';
+                passInput.type = show ? 'text' : 'password';
+                toggleBtn.innerHTML = '<i class="fas ' + (show ? 'fa-eye-slash' : 'fa-eye') + '" style="position: static; transform: none;"></i>';
+                toggleBtn.setAttribute('aria-label', show ? 'Hide password' : 'Show password');
+                toggleBtn.title = show ? 'Hide password' : 'Show password';
+                passInput.focus();
+            });
         })();
     </script>
 </body>
