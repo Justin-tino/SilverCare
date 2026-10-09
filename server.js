@@ -1566,6 +1566,28 @@ app.post('/api/check-senior-duplicate', requireAuth, requireRole('admin', 'emplo
     }
 });
 
+// --- API: Senior self-check — is this Senior ID already used by someone else? ---
+// Senior role may call this during verification. Returns ONLY a boolean —
+// never the other account's name, uid, or any personal detail.
+app.post('/api/check-senior-id', requireAuth, requireRole('senior'), async (req, res) => {
+    try {
+        const normId = String((req.body || {}).seniorId || '').trim().toUpperCase();
+        if (!normId) return res.json({ success: true, taken: false });
+        const snap = await admin.database().ref('users').orderByChild('role').equalTo('senior').once('value');
+        const users = snap.val() || {};
+        const me = req.authUser.uid;
+        for (const [uid, u] of Object.entries(users)) {
+            if (uid === me) continue;
+            if (String(u.seniorId || '').trim().toUpperCase() === normId) return res.json({ success: true, taken: true });
+            if (String(u.verificationSeniorId || '').trim().toUpperCase() === normId) return res.json({ success: true, taken: true });
+        }
+        res.json({ success: true, taken: false });
+    } catch (error) {
+        console.error('Senior ID check error:', error);
+        res.status(500).json({ success: false, message: 'Failed to check Senior ID.' });
+    }
+});
+
 // --- API: Verify Login (server-side user data lookup) ---
 app.post('/api/verify-login', async (req, res) => {
     const { idToken } = req.body;
@@ -1619,7 +1641,14 @@ app.post('/api/verify-login', async (req, res) => {
 // --- Manual Senior Registration (Employee-assisted) ---
 app.post('/api/register-senior', requireAuth, requireRole('admin', 'employee'), async (req, res) => {
     try {
-        const { email, password, fullname, firstName, middleName, lastName, extension, seniorId, address, barangay, city, province, postalCode, citizenship, cpNumber, dob, sex, civilStatus, faceImage, registeredBy } = req.body;
+        const { email, password, fullname, firstName, middleName, lastName, extension, seniorId, address, barangay, postalCode, citizenship, cpNumber, dob, sex, civilStatus, faceImage, registeredBy } = req.body;
+        // Fixed service area: Magalang, Pampanga only.
+        const city = 'Magalang';
+        const province = 'Pampanga';
+        const MAGALANG_BARANGAYS = ['AYALA','BUCANAN','CAMIAS','DOLORES','ESCALER','LAPAZ','NAVALING','SAN AGUSTIN','SAN ANTONIO','SAN FRANCISCO','SAN ILDEFONSO','SAN ISIDRO','SAN JOSE','SAN MIGUEL','SAN NICOLAS 1','SAN NICOLAS 2','SAN PABLO','SAN PEDRO 1','SAN PEDRO 2','SAN ROQUE','SAN VICENTE','STA. CRUZ','STA. LUCIA','STA. MARIA','STO. NIÑO','STO. ROSARIO','TURU'];
+        if (!barangay || !MAGALANG_BARANGAYS.includes(String(barangay).trim())) {
+            return res.json({ success: false, message: 'Please select a valid Magalang barangay.' });
+        }
 
         if (!email || !password || !firstName || !lastName || !seniorId) {
             return res.json({ success: false, message: 'Email, password, first name, last name, and Senior ID are required.' });
@@ -1675,7 +1704,7 @@ app.post('/api/register-senior', requireAuth, requireRole('admin', 'employee'), 
             status: 'Active',
             seniorId: seniorId,
             address: address || '',
-            barangay: barangay || '',
+            barangay: String(barangay).trim(),
             city: city || '',
             province: province || '',
             postalCode: postalCode || '',

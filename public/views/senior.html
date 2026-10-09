@@ -118,6 +118,67 @@
             flex-shrink: 0;
         }
 
+        /* ── Main navigation moved into the left sidebar (from the old top pills).
+               Uses .nav-pill + data-tab so the existing tab-switch JS works untouched.
+               !important beats style.css's top-pill rules. Separate SERVICES group below. */
+        .sidebar { overflow-y: auto; }
+        .sidebar .sidebar-links { margin: 0; }
+        .sidebar ul + .sidebar-menu-title.sidebar-section-gap {
+            margin-top: 20px;
+            padding-top: 18px;
+        }
+        .sidebar .side-nav-link {
+            position: relative !important;
+            display: flex !important;
+            align-items: center !important;
+            justify-content: flex-start !important;
+            gap: 12px !important;
+            width: 100% !important;
+            padding: 12px 16px !important;
+            color: rgba(255, 255, 255, 0.92) !important;
+            background: transparent !important;
+            border: none !important;
+            border-radius: 10px !important;
+            box-shadow: none !important;
+            font-weight: 600 !important;
+            font-size: 0.92rem !important;
+            line-height: 1.2 !important;
+            white-space: nowrap !important;
+            text-decoration: none !important;
+            cursor: pointer !important;
+            transition: all 0.2s ease !important;
+            flex: none !important;
+        }
+        .sidebar .side-nav-link i {
+            width: 20px !important;
+            text-align: center !important;
+            font-size: 0.95rem !important;
+            margin: 0 !important;
+            flex-shrink: 0 !important;
+        }
+        .sidebar .side-nav-link:hover:not(.active) {
+            background-color: rgba(255, 255, 255, 0.15) !important;
+            color: #fff !important;
+            padding-left: 20px !important;
+        }
+        .sidebar .side-nav-link.active {
+            background: #fff !important;
+            color: #15803d !important;
+            font-weight: 700 !important;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.18) !important;
+        }
+        /* Get Verified stands out red until it becomes the active (white) tab */
+        .sidebar #navPillVerification.side-nav-link:not(.active) {
+            background: #dc2626 !important;
+            color: #fff !important;
+            font-weight: 700 !important;
+        }
+        .sidebar #navPillVerification.side-nav-link:not(.active):hover {
+            background: #b91c1c !important;
+            color: #fff !important;
+            padding-left: 20px !important;
+        }
+
         /* Main Window */
         .main-window {
             flex: 1;
@@ -140,6 +201,130 @@
             z-index: 100;
             border-bottom: 1px solid #f1f5f9;
         }
+
+        /* Brand logo — big and crisp (uses pre-cropped wide asset, no dead space) */
+        .portal-header > div:first-child img {
+            height: 64px !important;
+            width: auto !important;
+            max-width: 260px !important;
+            object-fit: contain !important;
+            transform: none !important;
+        }
+
+        /* Senior header user area: MANUAL (help) | profile chip | LOGOUT — separate sections.
+           Long class chains beat style.css's broad `body > header div:first-child`. */
+        .portal-header > div:last-child.senior-user-area { gap: 12px !important; width: auto !important; flex-shrink: 0 !important; min-width: 0; }
+        .senior-user-chip {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            background: #ffffff;
+            border: 1.5px solid #bbf7d0;
+            border-radius: 999px;
+            box-shadow: 0 2px 10px rgba(22, 101, 52, 0.08);
+            padding: 6px 16px 6px 6px;
+            min-width: 0;
+            max-width: 360px;
+            flex: 0 1 auto;
+            line-height: 1.3;
+            overflow: hidden;
+        }
+        .senior-avatar {
+            width: 38px;
+            height: 38px;
+            border-radius: 50%;
+            flex-shrink: 0;
+            background: linear-gradient(135deg, #16a34a, #15803d);
+            color: #ffffff;
+            font-size: 1rem;
+            font-weight: 800;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            text-transform: uppercase;
+            box-shadow: 0 1px 4px rgba(22, 163, 74, 0.4);
+        }
+        .senior-user-chip > .senior-user-meta {
+            display: flex;
+            flex-direction: column;
+            align-items: flex-start;
+            gap: 2px;
+            flex: 1 1 auto;
+            min-width: 0;
+            text-align: left;
+            overflow: hidden;
+            line-height: 1.3;
+        }
+        /* Sidebar profile card (bottom of the left sidebar, like employee / admin) */
+        .sidebar-profile {
+            margin-top: auto;
+            padding: 16px 12px 14px;
+        }
+        .sidebar .senior-user-chip {
+            max-width: none;
+            width: 100%;
+        }
+        #portalGreeting,
+        .senior-user-chip .senior-user-name {
+            display: block;
+            grid-column: auto;
+            grid-row: auto;
+            justify-self: auto;
+            width: 100%;
+            font-size: 0.9rem;
+            font-weight: 800;
+            color: #0f172a;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            text-align: left;
+            margin: 0;
+            padding: 0;
+            line-height: 1.3;
+        }
+        .senior-user-chip .senior-user-role {
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            max-width: 100%;
+            font-size: 0.6rem;
+            font-weight: 800;
+            letter-spacing: 1px;
+            text-transform: uppercase;
+            color: #fff;
+            background: linear-gradient(135deg, #16a34a, #15803d);
+            border-radius: 999px;
+            padding: 2px 10px 2px 8px;
+            margin: 0;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            line-height: 1.5;
+            box-shadow: 0 1px 4px rgba(22, 163, 74, 0.4);
+        }
+        .senior-user-chip .senior-role-dot {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: #bbf7d0;
+            flex-shrink: 0;
+        }
+        .portal-header .senior-logout-btn {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 0;
+            background: none;
+            border: none;
+            color: #ef4444;
+            font-family: inherit;
+            cursor: pointer;
+            padding: 4px 2px;
+            flex-shrink: 0;
+        }
+        .portal-header .senior-logout-btn i { font-size: 1.2rem; margin-bottom: 3px; }
+        .portal-header .senior-logout-btn span { font-size: 0.7rem; font-weight: 700; }
 
         /* Button-specific overrides for senior nav pills (since we use <button> not <a>) */
         .nav-pill {
@@ -1175,7 +1360,6 @@
                 grid-template-columns: 1fr !important;
             }
             /* Header: only logo, hamburger, MANUAL and LOGOUT fit on a phone */
-            .header-greeting, .header-divider { display: none !important; }
             /* 16px inputs stop iOS Safari from auto-zooming into fields */
             input, select, textarea { font-size: 16px !important; }
         }
@@ -1817,6 +2001,10 @@
         .kyc-id-label { font-size:0.78rem; font-weight:700; color:#475569; display:flex; align-items:center; gap:6px; text-transform:uppercase; letter-spacing:0.3px; }
         .kyc-id-preview { width:100%; aspect-ratio: 1.6/1; background:white; border:1px solid #e2e8f0; border-radius:8px; overflow:hidden; display:flex; align-items:center; justify-content:center; position:relative; }
         .kyc-id-preview img { width:100%; height:100%; object-fit:cover; display:none; }
+        .kyc-id-preview video { width:100%; height:100%; object-fit:cover; display:none; background:#0f172a; }
+        .kyc-id-upload-box.cam-live .kyc-id-preview video { display:block; }
+        .kyc-id-upload-box.cam-live .kyc-id-placeholder { display:none; }
+        .kyc-id-gallery-fallback { background:none; border:none; color:#2563eb; font-size:0.75rem; font-weight:600; cursor:pointer; text-decoration:underline; padding:0; align-self:center; }
         .kyc-id-preview .kyc-id-placeholder { display:flex; flex-direction:column; align-items:center; gap:6px; color:#94a3b8; font-size:0.82rem; font-weight:500; }
         .kyc-id-preview .kyc-id-placeholder i { font-size:1.6rem; opacity:0.6; }
         .kyc-id-upload-box.has-image .kyc-id-preview img { display:block; }
@@ -1850,8 +2038,10 @@
                 flex: 1;
             }
             .portal-header > div:first-child img {
-                height: 32px !important;
-                transform: scale(1.8) !important; /* inline scale(2.8) overflows on mobile */
+                height: 48px !important;
+                width: auto !important;
+                max-width: 210px !important;
+                transform: none !important;
             }
 
             .mobile-menu-btn { display: flex !important; align-items: center; justify-content: center; order: 2; }
@@ -1859,32 +2049,13 @@
             .portal-header > div:first-child { order: 1; }
             .portal-header > div:last-child { order: 3; }
 
-            #tabContainer {
-                order: 4;
-                width: 100%;
-                flex-wrap: wrap;               /* wrap pills instead of cutting them off */
-                justify-content: flex-start;   /* left-align rows so no pill floats alone */
-                border-radius: 14px !important;
-                padding: 5px !important;
-                gap: 3px !important;
-            }
-            #tabContainer::-webkit-scrollbar { display: none; }
-            #tabContainer .nav-pill {
-                white-space: nowrap;
-                font-size: 0.78rem;
-                padding: 8px 6px;
-                min-height: 36px;
-                flex: 1 1 auto;                /* pills share the row evenly */
-                text-align: center;
-            }
-
             .portal-header > div:last-child {
                 width: auto !important;
                 gap: 10px !important;
                 min-width: 0;
             }
             /* Long greetings truncate instead of crushing the header */
-            .header-greeting { max-width: 30vw; }
+            .portal-header .senior-user-chip { max-width: 42vw; }
             #portalGreeting {
                 font-size: 0.88rem;
                 white-space: nowrap;
@@ -2092,18 +2263,14 @@
 
             /* Compact header on small phones */
             .portal-header > div:first-child img {
-                height: 30px !important;
-                transform: scale(1.6) !important;
+                height: 44px !important;
+                width: auto !important;
+                max-width: 190px !important;
+                transform: none !important;
             }
             .header-manual span { display: none; }
             .header-manual i { font-size: 1.1rem !important; margin-bottom: 0; }
             .portal-header > div:last-child { gap: 12px !important; }
-
-            #tabContainer .nav-pill {
-                font-size: 0.75rem;
-                padding: 7px 8px;
-                min-height: 34px;
-            }
 
             .stat-icon-wrapper {
                 width: 42px;
@@ -2163,22 +2330,8 @@
     <header class="portal-header">
         <!-- Brand / Logo -->
         <div style="display: flex; align-items: center; width: 250px;">
-            <img src="/images/logo.png" alt="SilverCare Logo" style="height: 45px; transform: scale(2.8); transform-origin: left center;">
+            <img src="/images/logo-wide.png" alt="SilverCare Logo" style="height: 64px; width: auto; max-width: 100%; object-fit: contain;">
         </div>
-
-        <!-- Center Navigation Pills (Identical layout to employee/admin) -->
-        <nav style="display: flex; gap: 5px; background: #f8fafc; padding: 8px; border-radius: 50px; border: 1px solid #e2e8f0;" id="tabContainer">
-            <button class="nav-pill active" data-tab="dashboard">Dashboard</button>
-            <button class="nav-pill" data-tab="profile">Profile</button>
-            <button class="nav-pill" data-tab="benefits">Benefits</button>
-            <button class="nav-pill" data-tab="health">Appointments</button>
-
-            <button class="nav-pill" data-tab="verification" id="navPillVerification" style="color: #ef4444; font-weight: 700;"><i class="fas fa-user-shield" style="margin-right: 5px;"></i>Get Verified</button>
-            <button class="nav-pill" data-tab="notifications" style="position: relative;">
-                Notifications
-                <span id="notifBadge" style="display: none; position: absolute; top: -2px; right: -5px; width: 12px; height: 12px; background-color: #ef4444; border-radius: 50%; border: 2px solid white; box-shadow: 0 0 5px rgba(239, 68, 68, 0.5);"></span>
-            </button>
-        </nav>
 
         <!-- Mobile Menu Toggle -->
         <button id="mobileMenuToggle" class="mobile-menu-btn" style="display:none; background:none; border:none; color:#1e293b; font-size:1.5rem; cursor:pointer; padding:8px;">
@@ -2188,32 +2341,45 @@
         <!-- Mobile Sidebar Overlay -->
         <div id="mobileSidebarOverlay" class="mobile-sidebar-overlay"></div>
 
-        <!-- Right Side User Menu (Identical layout to employee/admin) -->
-        <div style="display: flex; align-items: center; gap: 20px; width: 250px; justify-content: flex-end;">
-            <a href="/user-manual" target="_blank" title="Open the User Manual" class="header-manual" style="display: flex; flex-direction: column; align-items: center; justify-content: center; color: #059669; text-decoration: none;">
+        <!-- Right Side User Menu: MANUAL (help) | LOGOUT — profile chip now lives in the left sidebar -->
+        <div class="senior-user-area" style="display: flex; align-items: center; gap: 12px; width: 250px; justify-content: flex-end;">
+            <a href="/user-manual" target="_blank" title="Open the User Manual" class="header-manual senior-manual-btn" style="display: flex; flex-direction: column; align-items: center; justify-content: center; color: #059669; text-decoration: none; flex-shrink: 0;">
                 <i class="fas fa-book-open" style="font-size: 1.2rem; margin-bottom: 3px;"></i>
                 <span style="font-size: 0.7rem; font-weight: 700;">MANUAL</span>
             </a>
-            <div class="header-greeting" style="text-align: right; line-height: 1.2; min-width: 0;">
-                <div style="font-size: 0.75rem; color: #64748b; font-weight: 700; letter-spacing: 1px; text-transform: uppercase;">Senior Portal</div>
-                <div id="portalGreeting" style="font-size: 0.95rem; color: #1e293b; font-weight: 600; margin-top: 3px;">Loading...</div>
-            </div>
-            <div class="header-divider" style="height: 35px; width: 1px; background: #cbd5e1; flex-shrink: 0;"></div>
-            <div id="logoutBtn" style="display: flex; flex-direction: column; align-items: center; justify-content: center; color: #ef4444; cursor: pointer; transition: 0.2s;" onmouseover="this.style.opacity='0.7'" onmouseout="this.style.opacity='1'">
-                <i class="fas fa-sign-out-alt" style="font-size: 1.2rem; margin-bottom: 3px;"></i>
-                <span style="font-size: 0.7rem; font-weight: 700;">LOGOUT</span>
-            </div>
+            <button type="button" id="logoutBtn" class="senior-logout-btn">
+                <i class="fas fa-sign-out-alt"></i><span>LOGOUT</span>
+            </button>
         </div>
     </header>
 
     <div class="portal-layout">
-        <!-- Sidebar Menu - Green Background -->
+        <!-- Left Sidebar: main navigation (moved from top pills) + assistance services, separate sections -->
         <nav class="sidebar">
-            <div class="sidebar-menu-title">Services</div>
+            <div class="sidebar-menu-title">Menu</div>
+            <ul class="sidebar-links">
+                <li><a class="nav-pill side-nav-link active" data-tab="dashboard"><i class="fas fa-house"></i>Dashboard</a></li>
+                <li><a class="nav-pill side-nav-link" data-tab="profile"><i class="fas fa-user"></i>Profile</a></li>
+                <li><a class="nav-pill side-nav-link" data-tab="benefits"><i class="fas fa-gift"></i>Benefits</a></li>
+                <li><a class="nav-pill side-nav-link" data-tab="health"><i class="fas fa-calendar-check"></i>Appointments</a></li>
+                <li><a class="nav-pill side-nav-link" data-tab="verification" id="navPillVerification"><i class="fas fa-user-shield"></i>Get Verified</a></li>
+                <li><a class="nav-pill side-nav-link" data-tab="notifications"><i class="fas fa-bell"></i>Notifications<span id="notifBadge" style="display: none; position: absolute; top: 8px; right: 12px; width: 12px; height: 12px; background-color: #ef4444; border-radius: 50%; border: 2px solid white; box-shadow: 0 0 5px rgba(239, 68, 68, 0.5);"></span></a></li>
+            </ul>
+            <div class="sidebar-menu-title sidebar-section-gap">Services</div>
             <ul class="sidebar-links">
                 <li><a class="sidebar-link" data-service="burial"><i class="fas fa-ribbon"></i> Burial Assistance</a></li>
                 <li><a class="sidebar-link" data-service="bedridden"><i class="fas fa-bed"></i> Bedridden</a></li>
             </ul>
+            <!-- Sidebar Profile Card (same spot as employee / admin portals) -->
+            <div class="sidebar-profile">
+                <div class="senior-user-chip" title="Signed in as senior">
+                    <div class="senior-avatar" id="portalAvatar">S</div>
+                    <div class="senior-user-meta" style="min-width: 0; flex: 1;">
+                        <div id="portalGreeting" class="senior-user-name">Loading...</div>
+                        <div class="senior-user-role"><span class="senior-role-dot"></span><span>Senior Citizen</span></div>
+                    </div>
+                </div>
+            </div>
         </nav>
 
         <!-- Main Window -->
@@ -2381,7 +2547,7 @@
                                     <i class="fas fa-spinner fa-spin" style="font-size: 1.4rem; color: #2563eb;"></i>
                                     <span style="font-size: 0.65rem; color: #64748b; font-weight: 600;">Loading QR...</span>
                                 </div>
-                                <img id="seniorQrImage" alt="Your Digital ID QR Code" style="display: none; width: 100%; height: 100%; object-fit: contain; background: #ffffff; border-radius: 12px;">
+                                <img id="seniorQrImage" alt="Your QR Code" style="display: none; width: 100%; height: 100%; object-fit: contain; background: #ffffff; border-radius: 12px;">
                                 <div id="qrErrorState" style="position: absolute; inset: 0; display: none; flex-direction: column; align-items: center; justify-content: center; gap: 6px; background: #f8fafc; padding: 8px; text-align: center;">
                                     <i class="fas fa-exclamation-triangle" style="font-size: 1.2rem; color: #f59e0b;"></i>
                                     <span style="font-size: 0.62rem; color: #64748b; font-weight: 600;">Failed to load QR</span>
@@ -2391,7 +2557,7 @@
                             <p style="font-size: 0.85rem; font-weight: 700; color: var(--text-main); margin-bottom: 2px;">Scan for Verification</p>
                             <p style="font-size: 0.75rem; color: var(--text-muted); font-weight: 500;" id="qrOscaIdLabel">OSCA Magalang Office</p>
                             <button type="button" id="downloadDigitalIdBtn" style="margin-top: 10px; border: none; background: linear-gradient(135deg, #2563eb, #3b82f6); color: #fff; font-size: 0.72rem; font-weight: 700; padding: 8px 14px; border-radius: 10px; cursor: pointer; box-shadow: 0 3px 8px rgba(37, 99, 235, 0.25); display: flex; align-items: center; gap: 6px;">
-                                <i class="fas fa-download"></i> Download Digital ID
+                                <i class="fas fa-download"></i> Download QR Code
                             </button>
                         </div>
                     </div>
@@ -2841,22 +3007,51 @@
                                 <div class="kyc-form-grid">
                                     <div class="kyc-field" style="grid-column: 1 / -1;">
                                         <label class="kyc-label">Residential Address <span class="kyc-required">*</span></label>
-                                        <input type="text" id="kycAddress" class="kyc-input" placeholder="House/Block/Lot No., Street, Barangay, City" required>
+                                        <input type="text" id="kycAddress" class="kyc-input" placeholder="House/Block/Lot No., Street" required>
                                     </div>
 
                                     <div class="kyc-field">
                                         <label class="kyc-label">Province <span class="kyc-required">*</span></label>
-                                        <input type="text" id="kycProvince" class="kyc-input" placeholder="e.g. Pampanga" required>
+                                        <input type="text" id="kycProvince" class="kyc-input" value="Pampanga" readonly tabindex="-1" title="Province is fixed to Pampanga (Magalang, Pampanga only)" style="background:#e2e8f0; color:#64748b; cursor:not-allowed;" required>
                                     </div>
 
                                     <div class="kyc-field">
                                         <label class="kyc-label">Barangay <span class="kyc-required">*</span></label>
-                                        <input type="text" id="kycBarangay" class="kyc-input" placeholder="e.g. San Nicolas" required>
+                                        <select id="kycBarangay" class="kyc-input" required style="cursor:pointer; background: white;">
+                                            <option value="">-- Select Barangay --</option>
+                                            <option value="AYALA">AYALA</option>
+                                            <option value="BUCANAN">BUCANAN</option>
+                                            <option value="CAMIAS">CAMIAS</option>
+                                            <option value="DOLORES">DOLORES</option>
+                                            <option value="ESCALER">ESCALER</option>
+                                            <option value="LAPAZ">LAPAZ</option>
+                                            <option value="NAVALING">NAVALING</option>
+                                            <option value="SAN AGUSTIN">SAN AGUSTIN</option>
+                                            <option value="SAN ANTONIO">SAN ANTONIO</option>
+                                            <option value="SAN FRANCISCO">SAN FRANCISCO</option>
+                                            <option value="SAN ILDEFONSO">SAN ILDEFONSO</option>
+                                            <option value="SAN ISIDRO">SAN ISIDRO</option>
+                                            <option value="SAN JOSE">SAN JOSE</option>
+                                            <option value="SAN MIGUEL">SAN MIGUEL</option>
+                                            <option value="SAN NICOLAS 1">SAN NICOLAS 1</option>
+                                            <option value="SAN NICOLAS 2">SAN NICOLAS 2</option>
+                                            <option value="SAN PABLO">SAN PABLO</option>
+                                            <option value="SAN PEDRO 1">SAN PEDRO 1</option>
+                                            <option value="SAN PEDRO 2">SAN PEDRO 2</option>
+                                            <option value="SAN ROQUE">SAN ROQUE</option>
+                                            <option value="SAN VICENTE">SAN VICENTE</option>
+                                            <option value="STA. CRUZ">STA. CRUZ</option>
+                                            <option value="STA. LUCIA">STA. LUCIA</option>
+                                            <option value="STA. MARIA">STA. MARIA</option>
+                                            <option value="STO. NIÑO">STO. NIÑO</option>
+                                            <option value="STO. ROSARIO">STO. ROSARIO</option>
+                                            <option value="TURU">TURU</option>
+                                        </select>
                                     </div>
 
                                     <div class="kyc-field">
                                         <label class="kyc-label">City / Municipality</label>
-                                        <input type="text" id="kycCity" class="kyc-input" placeholder="e.g. Magalang" value="Magalang">
+                                        <input type="text" id="kycCity" class="kyc-input" value="Magalang" readonly tabindex="-1" title="City/Municipality is fixed to Magalang" style="background:#e2e8f0; color:#64748b; cursor:not-allowed;">
                                     </div>
 
                                     <div class="kyc-field">
@@ -2980,25 +3175,12 @@
                                 </div>
 
                                 <div class="kyc-field">
-                                    <label class="kyc-label">Do you have any illness / health condition? <span class="kyc-required">*</span></label>
-                                    <select id="kycIllnessSelect" class="kyc-input" style="cursor:pointer; background: white;">
-                                        <option value="">-- Select --</option>
-                                        <option value="None">No Illness / Healthy</option>
-                                        <option value="Hypertension">Hypertension (High Blood Pressure)</option>
-                                        <option value="Diabetes">Diabetes</option>
-                                        <option value="Heart Disease">Heart Disease</option>
-                                        <option value="Cancer">Cancer</option>
-                                        <option value="Stroke">Stroke</option>
-                                        <option value="Bedridden">Bedridden</option>
-                                        <option value="Asthma">Asthma</option>
-                                        <option value="Kidney Disease">Kidney Disease / Dialysis</option>
-                                        <option value="Dementia">Dementia / Alzheimer's</option>
-                                        <option value="Other">Enter manually</option>
-                                    </select>
+                                    <label class="kyc-label">Do you have any illness / health condition? <span class="kyc-required">*</span> <span style="font-weight:400; color:#64748b;">(tap all that apply)</span></label>
+                                    <div id="kycIllnessBoxGroup" style="display:flex; flex-wrap:wrap; gap:10px;" role="group" aria-label="Illness selection"></div>
                                 </div>
 
                                 <div class="kyc-field" id="kycIllnessOtherWrap" style="display: none;">
-                                    <label class="kyc-label">Enter manually - specify your illness</label>
+                                    <label class="kyc-label">Others — specify your illness</label>
                                     <input type="text" id="kycIllnessOther" class="kyc-input" placeholder="e.g. Osteoarthritis" maxlength="100">
                                 </div>
 
@@ -3043,7 +3225,7 @@
                             <div id="kycStep4Content" style="display: none;">
                                 <div class="kyc-form-header">
                                     <h3><i class="fas fa-id-card"></i> Senior Citizen ID</h3>
-                                    <p>Final step — enter your OSCA ID number and upload clear photos of the <strong>front and back</strong> of your Senior Citizen ID. Both sides are <strong>required</strong>.</p>
+                                    <p>Final step — enter your OSCA ID number and take clear photos of the <strong>front and back</strong> of your Senior Citizen ID using your camera. Both sides are <strong>required</strong>.</p>
                                 </div>
                                 <div class="kyc-field" style="margin-bottom: 16px;">
                                     <label class="kyc-label">Senior Citizen ID Number <span class="kyc-required">*</span></label>
@@ -3056,30 +3238,36 @@
                                         <div class="kyc-id-label"><i class="fas fa-id-card"></i> Front Side <span class="kyc-required">*</span></div>
                                         <div class="kyc-id-preview" id="kycIdFrontPreview">
                                             <div class="kyc-id-placeholder"><i class="fas fa-image"></i><span>No front photo yet</span></div>
+                                            <video id="kycIdFrontVideo" autoplay playsinline></video>
                                             <img id="kycIdFrontImg" alt="ID Front Preview">
                                         </div>
+                                        <canvas id="kycIdFrontCanvas" style="display:none;"></canvas>
                                         <input type="file" id="kycIdFrontInput" accept="image/*" style="display:none;">
                                         <div class="kyc-id-actions">
-                                            <button type="button" class="kyc-id-btn primary" id="kycIdFrontBtn"><i class="fas fa-upload"></i> Upload Front</button>
+                                            <button type="button" class="kyc-id-btn primary" id="kycIdFrontBtn"><i class="fas fa-camera"></i> Open Camera</button>
                                             <button type="button" class="kyc-id-btn" id="kycIdFrontRemove" style="display:none;"><i class="fas fa-trash"></i> Remove</button>
                                         </div>
-                                        <p class="kyc-id-hint">Photo, name and ID number must be readable.</p>
+                                        <button type="button" class="kyc-id-gallery-fallback" id="kycIdFrontGallery">Can't use the camera? Upload from gallery instead</button>
+                                        <p class="kyc-id-hint">Photo, name and ID number must be readable. Point your camera at the front of your ID, then tap Capture.</p>
                                     </div>
                                     <div class="kyc-id-upload-box" id="kycIdBackBox">
                                         <div class="kyc-id-label"><i class="fas fa-id-card"></i> Back Side <span class="kyc-required">*</span></div>
                                         <div class="kyc-id-preview" id="kycIdBackPreview">
                                             <div class="kyc-id-placeholder"><i class="fas fa-image"></i><span>No back photo yet</span></div>
+                                            <video id="kycIdBackVideo" autoplay playsinline></video>
                                             <img id="kycIdBackImg" alt="ID Back Preview">
                                         </div>
+                                        <canvas id="kycIdBackCanvas" style="display:none;"></canvas>
                                         <input type="file" id="kycIdBackInput" accept="image/*" style="display:none;">
                                         <div class="kyc-id-actions">
-                                            <button type="button" class="kyc-id-btn primary" id="kycIdBackBtn"><i class="fas fa-upload"></i> Upload Back</button>
+                                            <button type="button" class="kyc-id-btn primary" id="kycIdBackBtn"><i class="fas fa-camera"></i> Open Camera</button>
                                             <button type="button" class="kyc-id-btn" id="kycIdBackRemove" style="display:none;"><i class="fas fa-trash"></i> Remove</button>
                                         </div>
-                                        <p class="kyc-id-hint">Address, signature and QR must be visible.</p>
+                                        <button type="button" class="kyc-id-gallery-fallback" id="kycIdBackGallery">Can't use the camera? Upload from gallery instead</button>
+                                        <p class="kyc-id-hint">Address, signature and QR must be visible. Point your camera at the back of your ID, then tap Capture.</p>
                                     </div>
                                 </div>
-                                <div id="kycIdUploadError" style="display:none; background:#fef2f2; border:1px solid #fecaca; color:#991b1b; padding:10px 12px; border-radius:8px; font-size:0.84rem; font-weight:600; margin-bottom:6px;"><i class="fas fa-exclamation-circle" style="margin-right:6px; color:#dc2626;"></i>Both front and back of your Senior ID are required. Please upload both sides.</div>
+                                <div id="kycIdUploadError" style="display:none; background:#fef2f2; border:1px solid #fecaca; color:#991b1b; padding:10px 12px; border-radius:8px; font-size:0.84rem; font-weight:600; margin-bottom:6px;"><i class="fas fa-exclamation-circle" style="margin-right:6px; color:#dc2626;"></i>Both front and back of your Senior ID are required. Please capture both sides.</div>
                                 <div class="kyc-review-box" id="kycReviewBox" style="display:none;"></div>
                                 <button type="button" id="kycSubmitBtn" class="kyc-scan-btn kyc-submit-btn">
                                     <i class="fas fa-paper-plane"></i> Submit Verification

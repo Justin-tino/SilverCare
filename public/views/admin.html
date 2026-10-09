@@ -7,47 +7,49 @@
     <title>Admin Dashboard | SilverCare</title>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/css/style.css">
+    <link rel="stylesheet" href="/css/staff-sidebar.css">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <style>
         @media (max-width: 1000px) { .admin-money-grid { grid-template-columns: 1fr !important; } }
     </style>
 </head>
 
-<body>
+<body class="has-sidebar">
 
     <!-- Unified Top Header & Navigation -->
     <header style="display: flex; justify-content: space-between; align-items: center; padding: 0 40px; background: white; box-shadow: 0 4px 20px rgba(0,0,0,0.03); height: 100px; position: sticky; top: 0; z-index: 100; border-bottom: 1px solid #f1f5f9;">
         
         <!-- Brand / Logo -->
         <div style="display: flex; align-items: center; width: 250px;">
-            <img src="/images/logo.png" alt="SilverCare Logo" style="height: 45px; transform: scale(2.8); transform-origin: left center;">
+            <img src="/images/logo-wide.png" alt="SilverCare Logo" style="height: 70px; width: auto; max-width: 100%; object-fit: contain;">
         </div>
 
         <!-- Center Navigation Pills -->
         <nav style="display: flex; gap: 5px; background: #f8fafc; padding: 8px; border-radius: 50px; border: 1px solid #e2e8f0;">
-            <a class="nav-pill active" onclick="switchTab('overview', this)">Overview</a>
-            <a class="nav-pill" onclick="switchTab('appointments', this)">Appointments</a>
-            <a class="nav-pill" onclick="switchTab('financial', this)">Recent Financial</a>
+            <a class="nav-pill active" onclick="switchTab('overview', this)"><i class="fas fa-th-large"></i>Overview</a>
+            <a class="nav-pill" onclick="switchTab('appointments', this)"><i class="fas fa-calendar-check"></i>Appointments</a>
+            <a class="nav-pill" onclick="switchTab('financial', this)"><i class="fas fa-wallet"></i>Recent Financial</a>
             <a class="nav-pill" onclick="switchTab('users', this)" style="position: relative;">
-                Users
+                <i class="fas fa-users"></i>Users
                 <span id="adminUsersBadge" style="display: none; position: absolute; top: 2px; right: 5px; width: 10px; height: 10px; background-color: #ef4444; border-radius: 50%; border: 2px solid white; box-shadow: 0 0 5px rgba(239, 68, 68, 0.5);"></span>
             </a>
-            <a class="nav-pill" onclick="switchTab('face', this)">Face</a>
-            <a class="nav-pill" onclick="switchTab('settings', this)">Settings</a>
-            <a class="nav-pill" onclick="switchTab('audit', this)">Audit Trail</a>
+            <a class="nav-pill" onclick="switchTab('face', this)"><i class="fas fa-face-smile"></i>Face</a>
+            <a class="nav-pill" onclick="switchTab('settings', this)"><i class="fas fa-cog"></i>Settings</a>
+            <a class="nav-pill" onclick="switchTab('audit', this)"><i class="fas fa-list-alt"></i>Audit Trail</a>
         </nav>
 
-        <!-- Right Side User Menu -->
-        <div style="display: flex; align-items: center; gap: 20px; width: 250px; justify-content: flex-end;">
-            <div style="text-align: right; line-height: 1.2;">
-                <div style="font-size: 0.75rem; color: #64748b; font-weight: 700; letter-spacing: 1px; text-transform: uppercase;">System Admin</div>
-                <div style="font-size: 0.95rem; color: #1e293b; font-weight: 600; margin-top: 3px;">Welcome, Admin!</div>
+        <!-- Sidebar User Footer -->
+        <div class="staff-user-footer" style="display: flex; align-items: center; gap: 20px; width: 250px; justify-content: flex-end;">
+            <div class="staff-user-card">
+                <div class="staff-avatar">A</div>
+                <div class="staff-user-meta" style="min-width: 0; flex: 1;">
+                    <div id="adminGreeting" class="staff-user-name">Welcome, Admin!</div>
+                    <div class="staff-user-role"><span class="staff-role-dot"></span><span>System Admin</span></div>
+                </div>
             </div>
-            <div style="height: 35px; width: 1px; background: #cbd5e1;"></div>
-            <div id="logoutBtn" style="display: flex; flex-direction: column; align-items: center; justify-content: center; color: #ef4444; cursor: pointer; transition: 0.2s;" onmouseover="this.style.opacity='0.7'" onmouseout="this.style.opacity='1'">
-                <i class="fas fa-sign-out-alt" style="font-size: 1.2rem; margin-bottom: 3px;"></i>
-                <span style="font-size: 0.7rem; font-weight: 700;">LOGOUT</span>
-            </div>
+            <button type="button" id="logoutBtn" class="staff-logout-btn">
+                <i class="fas fa-sign-out-alt"></i><span>LOGOUT</span>
+            </button>
         </div>
     </header>
 

@@ -32,6 +32,80 @@ document.addEventListener('DOMContentLoaded', () => {
         return cleaned.length >= 10 && /^\+?\d+$/.test(cleaned);
     }
 
+    // ── Fixed service area: Magalang, Pampanga only ──
+    // Province and City/Municipality are locked; Barangay must be one of these 27.
+    const FIXED_PROVINCE = 'Pampanga';
+    const FIXED_CITY = 'Magalang';
+    const FIXED_ZIP = '2011';
+    const MAGALANG_BARANGAYS = ['AYALA','BUCANAN','CAMIAS','DOLORES','ESCALER','LAPAZ','NAVALING','SAN AGUSTIN','SAN ANTONIO','SAN FRANCISCO','SAN ILDEFONSO','SAN ISIDRO','SAN JOSE','SAN MIGUEL','SAN NICOLAS 1','SAN NICOLAS 2','SAN PABLO','SAN PEDRO 1','SAN PEDRO 2','SAN ROQUE','SAN VICENTE','STA. CRUZ','STA. LUCIA','STA. MARIA','STO. NIÑO','STO. ROSARIO','TURU'];
+
+    // ── Annex A (A.6/A.7) address lock: Magalang, Pampanga 2011 only ──
+    // Barangay mirrors the Step-1 verification selection; all four stay read-only.
+    function getStep1Barangay() {
+        const v = (document.getElementById('kycBarangay')?.value || '').trim();
+        if (v && MAGALANG_BARANGAYS.includes(v)) return v;
+        const stored = ((currentUserData && currentUserData.barangay) || '').trim();
+        const hit = MAGALANG_BARANGAYS.find(b => b.toUpperCase() === stored.toUpperCase());
+        return hit || stored;
+    }
+    function lockAnnexAAddressFields(root, barangay) {
+        if (!root) return;
+        const b = (barangay || '').trim();
+        root.querySelectorAll('#resBarangay, #permBarangay').forEach(el => { if (b) el.value = b; el.setAttribute('readonly', ''); el.tabIndex = -1; });
+        root.querySelectorAll('#resCityMunicipality, #permCityMunicipality').forEach(el => { el.value = FIXED_CITY; el.setAttribute('readonly', ''); el.tabIndex = -1; });
+        root.querySelectorAll('#resProvince, #permProvince').forEach(el => { el.value = FIXED_PROVINCE; el.setAttribute('readonly', ''); el.tabIndex = -1; });
+        root.querySelectorAll('#resZipCode, #permZipCode').forEach(el => { el.value = FIXED_ZIP; el.setAttribute('readonly', ''); el.tabIndex = -1; });
+    }
+
+    // ── Annex A personal-info sync: fill only EMPTY fields from Step 1 ──
+    // (already-typed Annex A edits are never overwritten).
+    function syncMilestonePersonalInfo(root) {
+        if (!root) return;
+        const get = (id) => (document.getElementById(id)?.value || '').trim();
+        const fill = (sel, val) => { const el = root.querySelector(sel); if (el && !(el.value || '').trim() && val) el.value = val; };
+        fill('#lastName', get('kycLastName'));
+        fill('#givenName', get('kycFirstName'));
+        fill('#middleName', get('kycMiddleName'));
+        fill('#dateOfBirth', get('kycDob'));
+        fill('#contactNums', get('kycCpNumber'));
+    }
+    // Copies House No. + Street (+ locked fields) into the permanent address
+    // so the senior does not have to type the same address twice.
+    function syncSameAsResidential(root) {
+        if (!root) return;
+        const chk = root.querySelector('.sameAsResidentialChk');
+        if (!chk || !chk.checked) return;
+        const pairs = [['#resHouseNum', '#permHouseNum'], ['#resStreet', '#permStreet'], ['#resBarangay', '#permBarangay'], ['#resCityMunicipality', '#permCityMunicipality'], ['#resProvince', '#permProvince'], ['#resZipCode', '#permZipCode']];
+        pairs.forEach(([from, to]) => {
+            const src = root.querySelector(from);
+            const dst = root.querySelector(to);
+            if (src && dst) dst.value = src.value;
+        });
+    }
+    function wireSameAsResidential(root) {
+        if (!root) return;
+        const chk = root.querySelector('.sameAsResidentialChk');
+        if (!chk || chk.dataset.wired) return;
+        chk.dataset.wired = '1';
+        const setPermEditable = (locked) => {
+            ['#permHouseNum', '#permStreet'].forEach(sel => {
+                const el = root.querySelector(sel);
+                if (!el) return;
+                if (locked) { el.setAttribute('readonly', ''); el.tabIndex = -1; el.style.background = '#e2e8f0'; el.style.color = '#64748b'; el.style.cursor = 'not-allowed'; }
+                else { el.removeAttribute('readonly'); el.tabIndex = 0; el.style.background = ''; el.style.color = ''; el.style.cursor = ''; }
+            });
+        };
+        chk.addEventListener('change', () => {
+            if (chk.checked) { syncSameAsResidential(root); setPermEditable(true); }
+            else setPermEditable(false);
+        });
+        // Live mirror while the box stays checked
+        ['#resHouseNum', '#resStreet'].forEach(sel => {
+            const el = root.querySelector(sel);
+            if (el) el.addEventListener('input', () => { if (chk.checked) syncSameAsResidential(root); });
+        });
+    }
+
     // --- Tab Switching Logic ---
     const navPills = document.querySelectorAll('.nav-pill');
     const tabPanels = document.querySelectorAll('.tab-panel');
@@ -262,7 +336,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // Auto-close sidebar on link click (mobile)
-    document.querySelectorAll('.sidebar-link').forEach(link => {
+    document.querySelectorAll('.sidebar-link, .side-nav-link').forEach(link => {
         link.addEventListener('click', () => {
             if (window.innerWidth <= 900) {
                 if (sidebar) sidebar.classList.remove('open');
@@ -322,6 +396,8 @@ document.addEventListener('DOMContentLoaded', () => {
     // --- Populate Dashboard Greeting & Stats ---
     function populatePortalData(data) {
         document.getElementById('portalGreeting').textContent = `Welcome, ${data.name}!`;
+        const portalAvatar = document.getElementById('portalAvatar');
+        if (portalAvatar) portalAvatar.textContent = (data.name || 'S').trim().charAt(0).toUpperCase();
 
         const dashAccountStatus = document.getElementById('dashAccountStatus');
         if (dashAccountStatus) {
@@ -726,7 +802,7 @@ document.addEventListener('DOMContentLoaded', () => {
             });
             const data = await res.json();
             if (!data.success || !data.qrImage) {
-                throw new Error(data.message || 'Failed to load your QR digital ID.');
+                throw new Error(data.message || 'Failed to load your QR code.');
             }
             img.src = data.qrImage;
             img.style.display = 'block';
@@ -743,67 +819,22 @@ document.addEventListener('DOMContentLoaded', () => {
     async function downloadDigitalId() {
         const data = currentUserData || {};
         const img = document.getElementById('seniorQrImage');
-        if (!img || !img.src) {
+        if (!img || !img.src || img.style.display === 'none') {
             showToast('Your QR code is still loading. Please try again in a moment.');
             return;
         }
         try {
-            const qrImg = await new Promise((resolve, reject) => {
-                const i = new Image();
-                i.onload = () => resolve(i);
-                i.onerror = reject;
-                i.src = img.src;
-            });
-
-            const W = 640, H = 900;
-            const canvas = document.createElement('canvas');
-            canvas.width = W;
-            canvas.height = H;
-            const ctx = canvas.getContext('2d');
-
-            // Card background
-            ctx.fillStyle = '#ffffff';
-            ctx.fillRect(0, 0, W, H);
-            ctx.fillStyle = '#1e40af';
-            ctx.fillRect(0, 0, W, 110);
-            ctx.fillStyle = '#ffffff';
-            ctx.font = '700 34px Inter, Arial';
-            ctx.fillText('SilverCare Digital ID', 40, 68);
-
-            // Senior details
-            ctx.textAlign = 'left';
-            ctx.fillStyle = '#1e293b';
-            ctx.font = '700 30px Inter, Arial';
-            ctx.fillText(data.name || 'Senior Citizen', 40, 180);
-            ctx.fillStyle = '#64748b';
-            ctx.font = '500 22px Inter, Arial';
-            ctx.fillText('OSCA ID: ' + (data.seniorId || 'OSCA-PENDING'), 40, 216);
-            if (data.dob) ctx.fillText('Date of Birth: ' + data.dob, 40, 248);
-
-            // QR code
-            const qs = 360;
-            const qx = (W - qs) / 2;
-            const qy = 300;
-            ctx.drawImage(qrImg, qx, qy, qs, qs);
-            ctx.strokeStyle = '#e2e8f0';
-            ctx.lineWidth = 2;
-            ctx.strokeRect(qx - 12, qy - 12, qs + 24, qs + 24);
-
-            ctx.fillStyle = '#64748b';
-            ctx.font = '600 18px Inter, Arial';
-            ctx.textAlign = 'center';
-            ctx.fillText('Present this digital ID at the OSCA Magalang Office', W / 2, qy + qs + 60);
-            ctx.fillText('for instant identity verification and benefit claiming.', W / 2, qy + qs + 92);
-            ctx.textAlign = 'left';
-
+            // Download the QR code image directly (no Digital ID card)
             const link = document.createElement('a');
-            link.download = 'SilverCare-DigitalID-' + (data.seniorId || String(data.name || 'senior').replace(/\s+/g, '-')) + '.png';
-            link.href = canvas.toDataURL('image/png');
+            link.download = 'SilverCare-QR-' + (data.seniorId || String(data.name || 'senior').replace(/\s+/g, '-')) + '.png';
+            link.href = img.src;
+            document.body.appendChild(link);
             link.click();
-            showToast('Digital ID downloaded! Keep it on your phone or print a copy.');
+            document.body.removeChild(link);
+            showToast('QR Code downloaded! Keep it on your phone or print a copy.');
         } catch (err) {
-            console.error('Digital ID download error:', err);
-            showToast('Failed to generate your Digital ID. Please try again.');
+            console.error('QR download error:', err);
+            showToast('Failed to download your QR Code. Please try again.');
         }
     }
 
@@ -1386,8 +1417,16 @@ document.addEventListener('DOMContentLoaded', () => {
         const defaultEmail = currentUserData ? currentUserData.email : '';
         const defaultAddress = currentUserData ? (currentUserData.address || '') : '';
         const defaultDob = currentUserData ? (currentUserData.dob || '') : '';
+        // Annex A name sync: split parts from the verified record (no retyping).
+        const defaultFirstName = currentUserData ? (currentUserData.firstName || '') : '';
+        const defaultLastName = currentUserData ? (currentUserData.lastName || '') : '';
+        const defaultMiddleName = currentUserData ? (currentUserData.middleName || '') : '';
+        const defaultCp = currentUserData ? (currentUserData.cpNumber || '') : '';
         const defaultSex = currentUserData ? (currentUserData.sex || 'Female') : 'Female';
         const defaultCivil = currentUserData ? (currentUserData.civilStatus || 'Married') : 'Married';
+        // Annex A address lock: verified barangay (canonical casing), Magalang / Pampanga / 2011.
+        const _storedBrgy = ((currentUserData && currentUserData.barangay) || '').trim();
+        const defaultBarangay = MAGALANG_BARANGAYS.find(b => b.toUpperCase() === _storedBrgy.toUpperCase()) || _storedBrgy;
 
         if (service === 'burial') {
             formTitle.textContent = 'Burial Assistance Claim Form';
@@ -1568,16 +1607,16 @@ document.addEventListener('DOMContentLoaded', () => {
                 </div>
                 <div class="form-grid-3">
                     <div class="form-group">
-                        <label for="lastName">A.1 Last Name *</label>
-                        <input type="text" id="lastName" placeholder="Last Name" required>
+                        <label for="lastName" title="Last Name">A.1 LN *</label>
+                        <input type="text" id="lastName" placeholder="Last Name" value="${defaultLastName}" required>
                     </div>
                     <div class="form-group">
-                        <label for="givenName">A.2 Given Name *</label>
-                        <input type="text" id="givenName" value="${defaultName}" required>
+                        <label for="givenName" title="First Name (Given Name)">A.2 FN *</label>
+                        <input type="text" id="givenName" value="${defaultFirstName}" required>
                     </div>
                     <div class="form-group">
-                        <label for="middleName">A.3 Middle Name</label>
-                        <input type="text" id="middleName" placeholder="Middle Name">
+                        <label for="middleName" title="Middle Initial">A.3 MI</label>
+                        <input type="text" id="middleName" placeholder="Middle Name" value="${defaultMiddleName}">
                     </div>
                 </div>
                 <div class="form-grid-3">
@@ -1612,24 +1651,28 @@ document.addEventListener('DOMContentLoaded', () => {
                     </div>
                     <div class="form-group">
                         <label for="resBarangay">Barangay</label>
-                        <input type="text" id="resBarangay" placeholder="Barangay" required>
+                        <input type="text" id="resBarangay" value="${defaultBarangay}" readonly tabindex="-1" title="Locked to your verified barangay" style="background:#e2e8f0; color:#64748b; cursor:not-allowed;" required>
                     </div>
                     <div class="form-group">
                         <label for="resCityMunicipality">City/Municipality</label>
-                        <input type="text" id="resCityMunicipality" placeholder="City/Municipality" required>
+                        <input type="text" id="resCityMunicipality" value="Magalang" readonly tabindex="-1" title="Fixed to Magalang" style="background:#e2e8f0; color:#64748b; cursor:not-allowed;" required>
                     </div>
                     <div class="form-group">
                         <label for="resProvince">Province</label>
-                        <input type="text" id="resProvince" placeholder="Province" required>
+                        <input type="text" id="resProvince" value="Pampanga" readonly tabindex="-1" title="Fixed to Pampanga" style="background:#e2e8f0; color:#64748b; cursor:not-allowed;" required>
                     </div>
                     <div class="form-group">
                         <label for="resZipCode">Zip Code</label>
-                        <input type="text" id="resZipCode" placeholder="Zip Code" required>
+                        <input type="text" id="resZipCode" value="2011" readonly tabindex="-1" title="Fixed to 2011 (Magalang)" style="background:#e2e8f0; color:#64748b; cursor:not-allowed;" required>
                     </div>
                 </div>
 
                 <div class="form-group" style="margin-top:8px;">
                     <label style="font-weight:700;">A.7 Permanent Address in the Philippines *</label>
+                    <label style="display:flex; align-items:center; gap:8px; font-weight:500; font-size:0.85rem; color:#475569; cursor:pointer; margin-top:6px;">
+                        <input type="checkbox" class="sameAsResidentialChk" style="width:16px; height:16px; cursor:pointer; accent-color:#2563eb;">
+                        Residential address is the same as permanent address
+                    </label>
                 </div>
                 <div class="form-grid-3">
                     <div class="form-group">
@@ -1642,19 +1685,19 @@ document.addEventListener('DOMContentLoaded', () => {
                     </div>
                     <div class="form-group">
                         <label for="permBarangay">Barangay</label>
-                        <input type="text" id="permBarangay" placeholder="Barangay" required>
+                        <input type="text" id="permBarangay" value="${defaultBarangay}" readonly tabindex="-1" title="Locked to your verified barangay" style="background:#e2e8f0; color:#64748b; cursor:not-allowed;" required>
                     </div>
                     <div class="form-group">
                         <label for="permCityMunicipality">City/Municipality</label>
-                        <input type="text" id="permCityMunicipality" placeholder="City/Municipality" required>
+                        <input type="text" id="permCityMunicipality" value="Magalang" readonly tabindex="-1" title="Fixed to Magalang" style="background:#e2e8f0; color:#64748b; cursor:not-allowed;" required>
                     </div>
                     <div class="form-group">
                         <label for="permProvince">Province</label>
-                        <input type="text" id="permProvince" placeholder="Province" required>
+                        <input type="text" id="permProvince" value="Pampanga" readonly tabindex="-1" title="Fixed to Pampanga" style="background:#e2e8f0; color:#64748b; cursor:not-allowed;" required>
                     </div>
                     <div class="form-group">
                         <label for="permZipCode">Zip Code</label>
-                        <input type="text" id="permZipCode" placeholder="Zip Code" required>
+                        <input type="text" id="permZipCode" value="2011" readonly tabindex="-1" title="Fixed to 2011 (Magalang)" style="background:#e2e8f0; color:#64748b; cursor:not-allowed;" required>
                     </div>
                 </div>
 
@@ -1772,7 +1815,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 <div class="form-grid-2">
                     <div class="form-group">
                         <label for="contactNums">C.1 Contact Numbers (Telephone and Mobile Numbers) *</label>
-                        <input type="tel" id="contactNums" placeholder="e.g. 09171234567" required>
+                        <input type="tel" id="contactNums" placeholder="e.g. 09171234567" value="${defaultCp}" required>
                     </div>
                     <div class="form-group">
                         <label for="emailAddr">C.2 Email Address</label>
@@ -1836,6 +1879,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 </div>
             `;
         }
+        // Wire the "same as residential" checkbox when the form has one
+        wireSameAsResidential(dynamicFormFields);
     }
 
     // --- Interactive Form Submit Handler ---
@@ -1888,6 +1933,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 // are stored as comma-joined strings (NOT arrays), and
                 // unnamed checkboxes like the urgent toggle (handled
                 // separately below) are skipped.
+                // Re-lock Annex A address to the fixed service area first
+                // (Magalang, Pampanga 2011 + verified barangay — tamper-proof).
+                syncSameAsResidential(interactiveServiceForm);
+                lockAnnexAAddressFields(interactiveServiceForm, ((currentUserData && currentUserData.barangay) || '').trim());
                 const formData = {};
                 const inputs = interactiveServiceForm.querySelectorAll('input, select, textarea');
                 inputs.forEach(input => {
@@ -3058,6 +3107,8 @@ document.addEventListener('DOMContentLoaded', () => {
     let kycFaceConfirmed = false;
     let kycIdFrontData = null;
     let kycIdBackData = null;
+    // Live camera streams for the Step-4 ID capture (one side at a time).
+    const kycIdCamStreams = { front: null, back: null };
     let kycMedCertData = null;
     let kycMedCertName = '';
     let kycMedCertType = '';
@@ -3219,6 +3270,11 @@ document.addEventListener('DOMContentLoaded', () => {
         // Keep already-typed answers when re-rendering for the same category/age
         if (milestoneSection.dataset.formKey === formKey && milestoneSection.innerHTML) {
             milestoneSection.style.display = 'flex';
+            // Re-sync the locked Annex A address (Step-1 barangay may have changed)
+            lockAnnexAAddressFields(milestoneSection, getStep1Barangay());
+            // Fill any still-empty personal fields from Step 1 (no retyping)
+            syncMilestonePersonalInfo(milestoneSection);
+            wireSameAsResidential(milestoneSection);
             return category;
         }
 
@@ -3228,6 +3284,7 @@ document.addEventListener('DOMContentLoaded', () => {
         milestoneSection.dataset.formKey = formKey;
         milestoneSection.innerHTML = buildMilestoneFormHtml(category, { prefillAge: numericAge, defaultMilestoneAge: defaultMilestoneAge });
         milestoneSection.style.display = 'flex';
+        wireSameAsResidential(milestoneSection);
         // Sync Sex/Civil Status from base KYC fields into milestone's Annex A to avoid double entry (profile auto-sync)
         try {
             const baseSex = document.getElementById('kycSex')?.value || '';
@@ -3246,12 +3303,19 @@ document.addEventListener('DOMContentLoaded', () => {
     function buildMilestoneFormHtml(category, options = {}) {
         const prefillAge = options.prefillAge || '';
         const defaultMilestoneAge = options.defaultMilestoneAge || 80;
-        const defaultName = currentUserData ? (currentUserData.name || '') : '';
+        // Annex A name sync: Step-1 inputs (already typed) first, stored record as fallback.
+        const step1Val = (id) => (document.getElementById(id)?.value || '').trim();
+        const defaultFirstName = step1Val('kycFirstName') || (currentUserData ? (currentUserData.firstName || '') : '');
+        const defaultLastName = step1Val('kycLastName') || (currentUserData ? (currentUserData.lastName || '') : '');
+        const defaultMiddleName = step1Val('kycMiddleName') || (currentUserData ? (currentUserData.middleName || '') : '');
         const defaultId = currentUserData ? (currentUserData.seniorId || '') : '';
         const defaultEmail = currentUserData ? (currentUserData.email || '') : '';
-        const defaultDob = currentUserData ? (currentUserData.dob || '') : '';
+        const defaultDob = step1Val('kycDob') || (currentUserData ? (currentUserData.dob || '') : '');
+        const defaultCp = step1Val('kycCpNumber') || (currentUserData ? (currentUserData.cpNumber || '') : '');
         const defaultSex = currentUserData ? (currentUserData.sex || 'Female') : 'Female';
         const defaultCivil = currentUserData ? (currentUserData.civilStatus || 'Married') : 'Married';
+        // Annex A address lock: barangay mirrors the Step-1 verification selection.
+        const defaultBarangay = getStep1Barangay();
 
         // Milestone-age choices: category-specific when a category applies,
         // otherwise every milestone age (uncategorized "Verification Form").
@@ -3298,16 +3362,16 @@ document.addEventListener('DOMContentLoaded', () => {
         html += `
             <div class="form-grid-3">
                 <div class="form-group">
-                    <label for="lastName">A.1 Last Name *</label>
-                    <input type="text" id="lastName" placeholder="Last Name" required>
+                    <label for="lastName" title="Last Name">A.1 LN *</label>
+                    <input type="text" id="lastName" placeholder="Last Name" value="${defaultLastName}" required>
                 </div>
                 <div class="form-group">
-                    <label for="givenName">A.2 Given Name *</label>
-                    <input type="text" id="givenName" value="${defaultName}" required>
+                    <label for="givenName" title="First Name (Given Name)">A.2 FN *</label>
+                    <input type="text" id="givenName" value="${defaultFirstName}" required>
                 </div>
                 <div class="form-group">
-                    <label for="middleName">A.3 Middle Name</label>
-                    <input type="text" id="middleName" placeholder="Middle Name">
+                    <label for="middleName" title="Middle Initial">A.3 MI</label>
+                    <input type="text" id="middleName" placeholder="Middle Name" value="${defaultMiddleName}">
                 </div>
             </div>
             <div class="form-grid-3">
@@ -3342,25 +3406,29 @@ document.addEventListener('DOMContentLoaded', () => {
                 </div>
                 <div class="form-group">
                     <label for="resBarangay">Barangay</label>
-                    <input type="text" id="resBarangay" placeholder="Barangay" required>
+                    <input type="text" id="resBarangay" value="${defaultBarangay}" readonly tabindex="-1" title="Locked to your verified barangay" style="background:#e2e8f0; color:#64748b; cursor:not-allowed;" required>
                 </div>
                 <div class="form-group">
                     <label for="resCityMunicipality">City/Municipality</label>
-                    <input type="text" id="resCityMunicipality" placeholder="City/Municipality" required>
+                    <input type="text" id="resCityMunicipality" value="Magalang" readonly tabindex="-1" title="Fixed to Magalang" style="background:#e2e8f0; color:#64748b; cursor:not-allowed;" required>
                 </div>
                 <div class="form-group">
                     <label for="resProvince">Province</label>
-                    <input type="text" id="resProvince" placeholder="Province" required>
+                    <input type="text" id="resProvince" value="Pampanga" readonly tabindex="-1" title="Fixed to Pampanga" style="background:#e2e8f0; color:#64748b; cursor:not-allowed;" required>
                 </div>
                 <div class="form-group">
                     <label for="resZipCode">Zip Code</label>
-                    <input type="text" id="resZipCode" placeholder="Zip Code" required>
+                    <input type="text" id="resZipCode" value="2011" readonly tabindex="-1" title="Fixed to 2011 (Magalang)" style="background:#e2e8f0; color:#64748b; cursor:not-allowed;" required>
                 </div>
             </div>
         `;
         html += `
             <div class="form-group" style="margin-top:8px;">
                 <label style="font-weight:700;">A.7 Permanent Address in the Philippines *</label>
+                    <label style="display:flex; align-items:center; gap:8px; font-weight:500; font-size:0.85rem; color:#475569; cursor:pointer; margin-top:6px;">
+                        <input type="checkbox" class="sameAsResidentialChk" style="width:16px; height:16px; cursor:pointer; accent-color:#2563eb;">
+                        Residential address is the same as permanent address
+                    </label>
             </div>
             <div class="form-grid-3">
                 <div class="form-group">
@@ -3373,19 +3441,19 @@ document.addEventListener('DOMContentLoaded', () => {
                 </div>
                 <div class="form-group">
                     <label for="permBarangay">Barangay</label>
-                    <input type="text" id="permBarangay" placeholder="Barangay" required>
+                    <input type="text" id="permBarangay" value="${defaultBarangay}" readonly tabindex="-1" title="Locked to your verified barangay" style="background:#e2e8f0; color:#64748b; cursor:not-allowed;" required>
                 </div>
                 <div class="form-group">
                     <label for="permCityMunicipality">City/Municipality</label>
-                    <input type="text" id="permCityMunicipality" placeholder="City/Municipality" required>
+                    <input type="text" id="permCityMunicipality" value="Magalang" readonly tabindex="-1" title="Fixed to Magalang" style="background:#e2e8f0; color:#64748b; cursor:not-allowed;" required>
                 </div>
                 <div class="form-group">
                     <label for="permProvince">Province</label>
-                    <input type="text" id="permProvince" placeholder="Province" required>
+                    <input type="text" id="permProvince" value="Pampanga" readonly tabindex="-1" title="Fixed to Pampanga" style="background:#e2e8f0; color:#64748b; cursor:not-allowed;" required>
                 </div>
                 <div class="form-group">
                     <label for="permZipCode">Zip Code</label>
-                    <input type="text" id="permZipCode" placeholder="Zip Code" required>
+                    <input type="text" id="permZipCode" value="2011" readonly tabindex="-1" title="Fixed to 2011 (Magalang)" style="background:#e2e8f0; color:#64748b; cursor:not-allowed;" required>
                 </div>
             </div>
 
@@ -3505,7 +3573,7 @@ document.addEventListener('DOMContentLoaded', () => {
             <div class="form-grid-2">
                 <div class="form-group">
                     <label for="contactNums">C.1 Contact Numbers (Telephone and Mobile Numbers) *</label>
-                    <input type="tel" id="contactNums" placeholder="e.g. 09171234567" required>
+                    <input type="tel" id="contactNums" placeholder="e.g. 09171234567" value="${defaultCp}" required>
                 </div>
                 <div class="form-group">
                     <label for="emailAddr">C.2 Email Address</label>
@@ -3588,6 +3656,124 @@ document.addEventListener('DOMContentLoaded', () => {
     // (id="kycSeniorIdNumber") and is intentionally NOT part of this template.
 
     // ── Senior ID Back-to-Back Upload (Step 4, required) ─────────────────────
+    // Shared UI update for both gallery upload and camera capture.
+    // Pass null to clear the side (Remove / Retake).
+    function setKycIdPhoto(side, finalData) {
+        const isFront = side === 'front';
+        if (isFront) kycIdFrontData = finalData; else kycIdBackData = finalData;
+        const previewImg = document.getElementById(isFront ? 'kycIdFrontImg' : 'kycIdBackImg');
+        const box = document.getElementById(isFront ? 'kycIdFrontBox' : 'kycIdBackBox');
+        const removeBtn = document.getElementById(isFront ? 'kycIdFrontRemove' : 'kycIdBackRemove');
+        if (previewImg) {
+            if (finalData) previewImg.src = finalData;
+            else previewImg.removeAttribute('src');
+        }
+        if (box) {
+            box.classList.toggle('has-image', !!finalData);
+            if (finalData) box.classList.remove('error');
+        }
+        if (removeBtn) removeBtn.style.display = finalData ? 'flex' : 'none';
+        if (finalData) {
+            const err = document.getElementById('kycIdUploadError');
+            if (err) err.style.display = 'none';
+        }
+        paintKycIdBtn(side);
+        renderKycReviewBox();
+    }
+    function paintKycIdBtn(side) {
+        const isFront = side === 'front';
+        const btn = document.getElementById(isFront ? 'kycIdFrontBtn' : 'kycIdBackBtn');
+        if (!btn) return;
+        const hasPhoto = isFront ? kycIdFrontData : kycIdBackData;
+        const live = !!kycIdCamStreams[side];
+        if (live) btn.innerHTML = '<i class="fas fa-camera"></i> Capture Photo';
+        else if (hasPhoto) btn.innerHTML = '<i class="fas fa-rotate-left"></i> Retake';
+        else btn.innerHTML = '<i class="fas fa-camera"></i> Open Camera';
+    }
+    function stopKycIdCamera(side) {
+        const s = kycIdCamStreams[side];
+        if (s) { try { s.getTracks().forEach(t => t.stop()); } catch (e) {} kycIdCamStreams[side] = null; }
+        const video = document.getElementById(side === 'front' ? 'kycIdFrontVideo' : 'kycIdBackVideo');
+        if (video) { try { video.pause(); } catch (e) {} video.srcObject = null; video.style.display = 'none'; }
+        const box = document.getElementById(side === 'front' ? 'kycIdFrontBox' : 'kycIdBackBox');
+        if (box) box.classList.remove('cam-live');
+        paintKycIdBtn(side);
+    }
+    function stopAllKycIdCameras() {
+        stopKycIdCamera('front');
+        stopKycIdCamera('back');
+    }
+    async function startKycIdCamera(side) {
+        const video = document.getElementById(side === 'front' ? 'kycIdFrontVideo' : 'kycIdBackVideo');
+        const box = document.getElementById(side === 'front' ? 'kycIdFrontBox' : 'kycIdBackBox');
+        const btn = document.getElementById(side === 'front' ? 'kycIdFrontBtn' : 'kycIdBackBtn');
+        try {
+            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                showToast('⚠️ Camera is not supported on this device. Please upload from the gallery instead.');
+                return false;
+            }
+            // One camera at a time — release the other side first.
+            stopKycIdCamera(side === 'front' ? 'back' : 'front');
+            if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Starting...'; }
+            // Rear lens for photographing the ID card.
+            const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } } });
+            kycIdCamStreams[side] = stream;
+            if (video) { video.srcObject = stream; video.style.display = 'block'; try { await video.play(); } catch (e) {} }
+            if (box) box.classList.add('cam-live');
+            if (btn) btn.disabled = false;
+            paintKycIdBtn(side);
+            return true;
+        } catch (err) {
+            console.error('ID camera error:', err);
+            showToast('⚠️ Camera access denied. Please allow camera permission, or upload from the gallery instead.');
+            if (btn) btn.disabled = false;
+            stopKycIdCamera(side);
+            return false;
+        }
+    }
+    function captureKycIdPhoto(side) {
+        const stream = kycIdCamStreams[side];
+        const video = document.getElementById(side === 'front' ? 'kycIdFrontVideo' : 'kycIdBackVideo');
+        const canvas = document.getElementById(side === 'front' ? 'kycIdFrontCanvas' : 'kycIdBackCanvas');
+        if (!stream || !video || !canvas || !video.videoWidth) {
+            showToast('⚠️ Camera is not ready yet. Please try again.');
+            return;
+        }
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        canvas.getContext('2d').drawImage(video, 0, 0);
+        let dataUrl = '';
+        try { dataUrl = canvas.toDataURL('image/jpeg', 0.85); }
+        catch (err) { showToast('⚠️ Failed to capture the photo. Please try again.'); return; }
+        stopKycIdCamera(side);
+        // Same 1.5MB downscale rule as gallery uploads.
+        const img = new Image();
+        img.onload = () => {
+            let finalData = dataUrl;
+            if (dataUrl.length > 1.5 * 1024 * 1024) {
+                const maxW = 1200;
+                let w = img.width, h = img.height;
+                if (w > maxW) { h = Math.round(h * maxW / w); w = maxW; }
+                canvas.width = w;
+                canvas.height = h;
+                canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+                try { finalData = canvas.toDataURL('image/jpeg', 0.75); } catch (e) {}
+            }
+            setKycIdPhoto(side, finalData);
+            showToast(side === 'front' ? 'Front photo captured!' : 'Back photo captured!');
+        };
+        img.onerror = () => setKycIdPhoto(side, dataUrl);
+        img.src = dataUrl;
+    }
+    async function onKycIdMainBtn(side) {
+        const hasPhoto = side === 'front' ? kycIdFrontData : kycIdBackData;
+        if (kycIdCamStreams[side]) { captureKycIdPhoto(side); return; }
+        if (hasPhoto) {
+            // Retake: discard the old photo and reopen the camera.
+            setKycIdPhoto(side, null);
+        }
+        await startKycIdCamera(side);
+    }
     function handleKycIdFile(file, side) {
         if (!file) return;
         if (!file.type.startsWith('image/')) {
@@ -3618,49 +3804,9 @@ document.addEventListener('DOMContentLoaded', () => {
                     ctx.drawImage(img, 0, 0, w, h);
                     try { finalData = canvas.toDataURL('image/jpeg', 0.75); } catch (err) {}
                 }
-                if (side === 'front') {
-                    kycIdFrontData = finalData;
-                    const previewImg = document.getElementById('kycIdFrontImg');
-                    const box = document.getElementById('kycIdFrontBox');
-                    const removeBtn = document.getElementById('kycIdFrontRemove');
-                    if (previewImg) previewImg.src = finalData;
-                    if (box) { box.classList.add('has-image'); box.classList.remove('error'); }
-                    if (removeBtn) removeBtn.style.display = 'flex';
-                    const err = document.getElementById('kycIdUploadError');
-                    if (err) err.style.display = 'none';
-                    renderKycReviewBox();
-                } else {
-                    kycIdBackData = finalData;
-                    const previewImg = document.getElementById('kycIdBackImg');
-                    const box = document.getElementById('kycIdBackBox');
-                    const removeBtn = document.getElementById('kycIdBackRemove');
-                    if (previewImg) previewImg.src = finalData;
-                    if (box) { box.classList.add('has-image'); box.classList.remove('error'); }
-                    if (removeBtn) removeBtn.style.display = 'flex';
-                    const err = document.getElementById('kycIdUploadError');
-                    if (err) err.style.display = 'none';
-                    renderKycReviewBox();
-                }
+                setKycIdPhoto(side, finalData);
             };
-            img.onerror = () => {
-                if (side === 'front') {
-                    kycIdFrontData = dataUrl;
-                    const pImg = document.getElementById('kycIdFrontImg');
-                    const box = document.getElementById('kycIdFrontBox');
-                    if (pImg) pImg.src = dataUrl;
-                    if (box) box.classList.add('has-image');
-                    const rBtn = document.getElementById('kycIdFrontRemove');
-                    if (rBtn) rBtn.style.display = 'flex';
-                } else {
-                    kycIdBackData = dataUrl;
-                    const pImg = document.getElementById('kycIdBackImg');
-                    const box = document.getElementById('kycIdBackBox');
-                    if (pImg) pImg.src = dataUrl;
-                    if (box) box.classList.add('has-image');
-                    const rBtn = document.getElementById('kycIdBackRemove');
-                    if (rBtn) rBtn.style.display = 'flex';
-                }
-            };
+            img.onerror = () => setKycIdPhoto(side, dataUrl);
             img.src = dataUrl;
         };
         reader.readAsDataURL(file);
@@ -3672,17 +3818,23 @@ document.addEventListener('DOMContentLoaded', () => {
     const kycIdBackInput = document.getElementById('kycIdBackInput');
     const kycIdBackBtn = document.getElementById('kycIdBackBtn');
     const kycIdBackRemove = document.getElementById('kycIdBackRemove');
+    const kycIdFrontGallery = document.getElementById('kycIdFrontGallery');
+    const kycIdBackGallery = document.getElementById('kycIdBackGallery');
 
-    if (kycIdFrontBtn && kycIdFrontInput) {
-        kycIdFrontBtn.addEventListener('click', () => kycIdFrontInput.click());
+    // Main buttons drive the in-page camera: Open Camera → Capture Photo → Retake.
+    if (kycIdFrontBtn) kycIdFrontBtn.addEventListener('click', () => onKycIdMainBtn('front'));
+    if (kycIdBackBtn) kycIdBackBtn.addEventListener('click', () => onKycIdMainBtn('back'));
+    // Gallery fallback (camera unsupported / denied / desktop without camera).
+    if (kycIdFrontGallery && kycIdFrontInput) kycIdFrontGallery.addEventListener('click', () => kycIdFrontInput.click());
+    if (kycIdBackGallery && kycIdBackInput) kycIdBackGallery.addEventListener('click', () => kycIdBackInput.click());
+    if (kycIdFrontInput) {
         kycIdFrontInput.addEventListener('change', (e) => {
             const file = e.target.files && e.target.files[0];
             if (file) handleKycIdFile(file, 'front');
             e.target.value = '';
         });
     }
-    if (kycIdBackBtn && kycIdBackInput) {
-        kycIdBackBtn.addEventListener('click', () => kycIdBackInput.click());
+    if (kycIdBackInput) {
         kycIdBackInput.addEventListener('change', (e) => {
             const file = e.target.files && e.target.files[0];
             if (file) handleKycIdFile(file, 'back');
@@ -3691,24 +3843,14 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     if (kycIdFrontRemove) {
         kycIdFrontRemove.addEventListener('click', () => {
-            kycIdFrontData = null;
-            const img = document.getElementById('kycIdFrontImg');
-            const box = document.getElementById('kycIdFrontBox');
-            if (img) img.src = '';
-            if (box) box.classList.remove('has-image');
-            kycIdFrontRemove.style.display = 'none';
-            renderKycReviewBox();
+            stopKycIdCamera('front');
+            setKycIdPhoto('front', null);
         });
     }
     if (kycIdBackRemove) {
         kycIdBackRemove.addEventListener('click', () => {
-            kycIdBackData = null;
-            const img = document.getElementById('kycIdBackImg');
-            const box = document.getElementById('kycIdBackBox');
-            if (img) img.src = '';
-            if (box) box.classList.remove('has-image');
-            kycIdBackRemove.style.display = 'none';
-            renderKycReviewBox();
+            stopKycIdCamera('back');
+            setKycIdPhoto('back', null);
         });
     }
 
@@ -3804,6 +3946,32 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    // Privacy-safe duplicate check: the server returns only taken:true/false,
+    // never the other account's name or details. Returns null when the check
+    // itself fails (fail-open — staff review remains the final authority).
+    async function checkSeniorIdTaken(seniorId) {
+        try {
+            const token = await auth.currentUser.getIdToken();
+            const res = await fetch('/api/check-senior-id', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+                body: JSON.stringify({ seniorId: seniorId })
+            });
+            const data = await res.json();
+            if (data && data.success) return !!data.taken;
+            return null;
+        } catch (err) {
+            console.warn('Senior ID check failed:', err);
+            return null;
+        }
+    }
+    function showSeniorIdTaken(sidField) {
+        showToast('⚠️ This Senior Citizen ID number is already used. Please double-check the number on your ID card.');
+        const sidErr = document.getElementById('kycSeniorIdError');
+        if (sidErr) { sidErr.textContent = 'This ID number is already used. Please verify your ID card, or visit the OSCA office if you believe this is a mistake.'; sidErr.style.display = 'block'; }
+        if (sidField) { sidField.classList.add('error'); sidField.focus(); }
+    }
+
     // Returns the single Step-4 ID number (static HTML — unique by design).
     // Falls back to the milestone interstitial + profile only when Step 4 is
     // somehow absent (defensive; normally Step 4 always exists).
@@ -3822,9 +3990,7 @@ document.addEventListener('DOMContentLoaded', () => {
     var renderKycReviewBox = function () {
         const box = document.getElementById('kycReviewBox');
         if (!box) return;
-        const illnessSel = document.getElementById('kycIllnessSelect');
-        let illness = illnessSel ? illnessSel.value : '';
-        if (illness === 'Other') illness = (document.getElementById('kycIllnessOther')?.value || '').trim() || 'Other (specified)';
+        let illness = getKycIllnessValue();
         const illnessLabel = !illness ? 'Not answered yet' : (illness === 'None' ? 'No Illness / Healthy' : illness);
         const medLabel = (illness && illness !== 'None')
             ? (kycMedCertData ? ('<span class="ok">Attached: ' + kycMedCertName + '</span>') : '<span class="missing">Missing — required</span>')
@@ -3849,8 +4015,13 @@ document.addEventListener('DOMContentLoaded', () => {
             const firstName = document.getElementById('kycFirstName').value.trim();
             const lastName = document.getElementById('kycLastName').value.trim();
             const address = document.getElementById('kycAddress').value.trim();
-            const province = document.getElementById('kycProvince').value.trim();
-            const barangay = document.getElementById('kycBarangay').value.trim();
+            // Province / City are fixed to Pampanga / Magalang (read-only fields).
+            const provinceEl = document.getElementById('kycProvince');
+            const cityEl = document.getElementById('kycCity');
+            if (provinceEl) provinceEl.value = FIXED_PROVINCE;
+            if (cityEl) cityEl.value = FIXED_CITY;
+            const province = FIXED_PROVINCE;
+            const barangay = (document.getElementById('kycBarangay').value || '').trim();
             const citizenship = document.getElementById('kycCitizenship').value.trim();
             const cpNumber = document.getElementById('kycCpNumber').value.trim();
             const dob = document.getElementById('kycDob').value;
@@ -3862,8 +4033,8 @@ document.addEventListener('DOMContentLoaded', () => {
             if (!firstName) { showToast('⚠️ Please enter your first name.'); document.getElementById('kycFirstName').focus(); return; }
             if (!lastName) { showToast('⚠️ Please enter your last name.'); document.getElementById('kycLastName').focus(); return; }
             if (!address) { showToast('⚠️ Please enter your address.'); document.getElementById('kycAddress').focus(); return; }
-            if (!province) { showToast('⚠️ Please enter your province.'); document.getElementById('kycProvince').focus(); return; }
-            if (!barangay) { showToast('⚠️ Please enter your barangay.'); document.getElementById('kycBarangay').focus(); return; }
+            if (!barangay) { showToast('⚠️ Please select your barangay.'); document.getElementById('kycBarangay').focus(); return; }
+            if (!MAGALANG_BARANGAYS.includes(barangay)) { showToast('⚠️ Please select a valid Magalang barangay.'); document.getElementById('kycBarangay').focus(); return; }
             if (!citizenship) { showToast('⚠️ Please enter your citizenship.'); document.getElementById('kycCitizenship').focus(); return; }
             if (!dob) { showToast('⚠️ Please enter your Date of Birth.'); document.getElementById('kycDob').focus(); return; }
             if (!kycSexVal) { showToast('⚠️ Please select your Sex.'); document.getElementById('kycSex').focus(); return; }
@@ -3936,6 +4107,11 @@ document.addEventListener('DOMContentLoaded', () => {
             const category = milestoneSection?.dataset.category || '';
             const formLabel = category ? `${category} Form` : 'Verification Form';
 
+            // Re-lock Annex A address to the fixed service area before validating
+            // (tamper-proof even if edited via devtools).
+            syncSameAsResidential(milestoneSection);
+            lockAnnexAAddressFields(milestoneSection, getStep1Barangay());
+
             const requiredMilestoneFields = milestoneSection ? milestoneSection.querySelectorAll('input[required], select[required]') : [];
             for (const field of requiredMilestoneFields) {
                 if (!(field.value || '').trim()) {
@@ -3984,19 +4160,100 @@ document.addEventListener('DOMContentLoaded', () => {
     // static wiring below can call it, but the helper it uses to reset the
     // med-cert (clearKycMedPreview, a `var`) is assigned further down — JS
     // hoists the `var` but NOT its value, so guard the call.
+    // ── Step 3 illness picker: multi-select box buttons (tap all that apply) ──
+    // 'None' (No Illness / Healthy) is exclusive; 'Other' reveals the free-text box.
+    const KYC_ILLNESS_OPTIONS = [
+        { value: 'Hypertension', label: 'Hypertension' },
+        { value: 'Diabetes', label: 'Diabetes' },
+        { value: 'Heart Disease', label: 'Heart Disease' },
+        { value: 'Arthritis', label: 'Arthritis' },
+        { value: 'Asthma', label: 'Asthma' },
+        { value: 'COPD / Chronic Lung Disease', label: 'COPD / Lung Disease' },
+        { value: 'Cataract / Eye Problems', label: 'Cataract / Eye Problems' },
+        { value: 'Hearing Loss', label: 'Hearing Loss' },
+        { value: 'Osteoporosis', label: 'Osteoporosis' },
+        { value: 'Stroke', label: 'Stroke' },
+        { value: 'Cancer', label: 'Cancer' },
+        { value: 'Kidney Disease / Dialysis', label: 'Kidney Disease / Dialysis' },
+        { value: "Dementia / Alzheimer's", label: "Dementia / Alzheimer's" },
+        { value: "Parkinson's Disease", label: "Parkinson's Disease" },
+        { value: 'Bedridden', label: 'Bedridden' },
+        { value: 'Tuberculosis', label: 'Tuberculosis' },
+        { value: 'Anemia', label: 'Anemia' },
+        { value: 'Goiter / Thyroid Disorder', label: 'Goiter / Thyroid' },
+        { value: 'Other', label: 'Others (specify)' }
+    ];
+    const kycSelectedIllnesses = new Set();
+    const KYC_BOX_IDLE = 'border:2px solid #cbd5e1; background:#ffffff; color:#475569; font-weight:600; font-size:0.88rem; padding:10px 18px; border-radius:10px; cursor:pointer; transition:0.15s;';
+    const KYC_BOX_ACTIVE = 'border:2px solid #2563eb; background:#eff6ff; color:#1d4ed8; font-weight:700; font-size:0.88rem; padding:10px 18px; border-radius:10px; cursor:pointer; transition:0.15s;';
+    const KYC_NONE_IDLE = 'border:2px solid #cbd5e1; background:#ffffff; color:#475569; font-weight:600; font-size:0.88rem; padding:10px 18px; border-radius:10px; cursor:pointer; transition:0.15s; width:100%;';
+    const KYC_NONE_ACTIVE = 'border:2px solid #059669; background:#ecfdf5; color:#047857; font-weight:700; font-size:0.88rem; padding:10px 18px; border-radius:10px; cursor:pointer; transition:0.15s; width:100%;';
+
+    // Single source of truth for Step 3: '' = unanswered, 'None' = healthy,
+    // otherwise a comma-joined illness list (Others text appended).
+    function getKycIllnessValue() {
+        if (kycSelectedIllnesses.size === 0) return '';
+        if (kycSelectedIllnesses.has('None')) return 'None';
+        const named = KYC_ILLNESS_OPTIONS
+            .filter(o => o.value !== 'Other' && kycSelectedIllnesses.has(o.value))
+            .map(o => o.value);
+        if (kycSelectedIllnesses.has('Other')) {
+            const otherText = (document.getElementById('kycIllnessOther')?.value || '').trim();
+            named.push(otherText || 'Other (specified)');
+        }
+        return named.join(', ');
+    }
+    function paintKycIllnessBoxes() {
+        const group = document.getElementById('kycIllnessBoxGroup');
+        if (!group) return;
+        group.querySelectorAll('button[data-illness]').forEach(btn => {
+            const v = btn.getAttribute('data-illness');
+            const on = kycSelectedIllnesses.has(v);
+            btn.style.cssText = v === 'None' ? (on ? KYC_NONE_ACTIVE : KYC_NONE_IDLE) : (on ? KYC_BOX_ACTIVE : KYC_BOX_IDLE);
+            const base = btn.getAttribute('data-label') || v;
+            btn.textContent = (on ? '✓ ' : '') + base;
+        });
+    }
+    function toggleKycIllness(value) {
+        if (value === 'None') {
+            kycSelectedIllnesses.clear();
+            kycSelectedIllnesses.add('None');
+        } else {
+            kycSelectedIllnesses.delete('None');
+            if (kycSelectedIllnesses.has(value)) kycSelectedIllnesses.delete(value);
+            else kycSelectedIllnesses.add(value);
+        }
+        paintKycIllnessBoxes();
+        updateKycIllnessFields();
+    }
+    function renderKycIllnessBoxes() {
+        const group = document.getElementById('kycIllnessBoxGroup');
+        if (!group || group.dataset.rendered) return;
+        group.dataset.rendered = '1';
+        const mk = (value, label, fullWidth) => {
+            const b = document.createElement('button');
+            b.type = 'button';
+            b.setAttribute('data-illness', value);
+            b.setAttribute('data-label', label);
+            b.textContent = label;
+            b.style.cssText = fullWidth ? KYC_NONE_IDLE : KYC_BOX_IDLE;
+            if (fullWidth) { const w = document.createElement('div'); w.style.cssText = 'flex-basis:100%;'; w.appendChild(b); b.style.width = '100%'; group.appendChild(w); }
+            else group.appendChild(b);
+            b.addEventListener('click', () => toggleKycIllness(value));
+        };
+        mk('None', 'No Illness / Healthy', true);
+        KYC_ILLNESS_OPTIONS.forEach(o => mk(o.value, o.label, false));
+        paintKycIllnessBoxes();
+    }
     function hasReportedKycIllness() {
-        const sel = document.getElementById('kycIllnessSelect');
-        if (!sel) return false;
-        const v = sel.value;
+        const v = getKycIllnessValue();
         return !!(v && v !== 'None');
     }
     function updateKycIllnessFields() {
-        const sel = document.getElementById('kycIllnessSelect');
-        if (!sel) return;
         const wrap = document.getElementById('kycIllnessOtherWrap');
         const certWrap = document.getElementById('kycMedCertWrap');
         const certError = document.getElementById('kycMedCertError');
-        const showOther = sel.value === 'Other';
+        const showOther = kycSelectedIllnesses.has('Other');
         const needsCert = hasReportedKycIllness();
         if (wrap) wrap.style.display = showOther ? 'block' : 'none';
         if (!showOther) {
@@ -4009,12 +4266,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (certError) certError.style.display = 'none';
         }
     }
-    const kycIllnessSelect = document.getElementById('kycIllnessSelect');
-    if (kycIllnessSelect) {
-        kycIllnessSelect.addEventListener('change', () => {
-            updateKycIllnessFields();
-        });
-    }
+    renderKycIllnessBoxes();
     function setKycMedPreview(fileName, fileType, dataUrl, fileSize) {
         const preview = document.getElementById('kycMedCertPreview');
         const img = document.getElementById('kycMedCertImg');
@@ -4136,18 +4388,17 @@ document.addEventListener('DOMContentLoaded', () => {
     // NOTE: Step 4 lives on its own screen — wire those buttons where Step 4
     // exists in the DOM flow below (NOT here), so Submit always works.
     function validateKycHealthToSeniorId() {
-        const illnessSelectEl = document.getElementById('kycIllnessSelect');
-        const illness = illnessSelectEl ? illnessSelectEl.value : '';
+        const illness = getKycIllnessValue();
         const illnessOtherEl = document.getElementById('kycIllnessOther');
         const illnessOther = illnessOtherEl ? illnessOtherEl.value.trim() : '';
+        const otherPicked = kycSelectedIllnesses.has('Other');
         if (!illness) {
-            showToast('Please answer the illness question to continue.');
-            const sel = document.getElementById('kycIllnessSelect');
-            if (sel) sel.focus();
+            showToast('Please tap at least one option to continue.');
+            document.getElementById('kycIllnessBoxGroup')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
             return false;
         }
-        if (illness === 'Other' && !illnessOther) {
-            showToast('Please specify your illness, or choose "No Illness / Healthy".');
+        if (otherPicked && !illnessOther) {
+            showToast('Please specify your illness under "Others", or remove it.');
             if (illnessOtherEl) illnessOtherEl.focus();
             return false;
         }
@@ -4190,12 +4441,23 @@ document.addEventListener('DOMContentLoaded', () => {
         const submitBtn = document.getElementById('kycSubmitBtn');
         if (!backBtn || !sidInput || !submitBtn) return;
         kycStep4Wired = true;
-        backBtn.addEventListener('click', () => goToKycStep('health'));
+        backBtn.addEventListener('click', () => { stopAllKycIdCameras(); goToKycStep('health'); });
         sidInput.addEventListener('input', () => {
             const err = document.getElementById('kycSeniorIdError');
             if (err) err.style.display = 'none';
             sidInput.classList.remove('error');
             renderKycReviewBox();
+        });
+        // Early duplicate warning (non-blocking): the submit handler re-checks
+        // and blocks when the ID is already used by another account.
+        sidInput.addEventListener('change', async () => {
+            const v = (sidInput.value || '').trim();
+            if (!v) return;
+            const taken = await checkSeniorIdTaken(v);
+            if (taken === true) {
+                goToKycStep('seniorid');
+                showSeniorIdTaken(sidInput);
+            }
         });
         // Step 4 owns the ONLY submit action: validate everything, then submit.
         submitBtn.addEventListener('click', () => {
@@ -4462,25 +4724,23 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         // ── Step 3 re-validated at submit: illness question + med cert ──
-        const illnessSelectEl = document.getElementById('kycIllnessSelect');
-        let illness = illnessSelectEl ? illnessSelectEl.value : '';
+        let illness = getKycIllnessValue();
         const illnessOtherEl = document.getElementById('kycIllnessOther');
         const illnessOther = illnessOtherEl ? illnessOtherEl.value.trim() : '';
+        const otherPicked = kycSelectedIllnesses.has('Other');
 
         if (!illness) {
             showToast('Please answer the illness question to complete your verification.');
             goToKycStep('health');
-            const sel = document.getElementById('kycIllnessSelect');
-            if (sel) sel.focus();
+            document.getElementById('kycIllnessBoxGroup')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
             return;
         }
-        if (illness === 'Other' && !illnessOther) {
-            showToast('Please use Enter manually to specify your illness, or go back and choose "No Illness / Healthy".');
+        if (otherPicked && !illnessOther) {
+            showToast('Please specify your illness under "Others", or remove it.');
             goToKycStep('health');
             if (illnessOtherEl) illnessOtherEl.focus();
             return;
         }
-        if (illness === 'Other') illness = illnessOther;
         const hasReportedIllness = illness !== 'None';
 
         // Medical certification is required only when an illness is reported.
@@ -4533,14 +4793,33 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
+        // ── Duplicate Senior ID block (privacy-safe) ──
+        // Notifies the senior when the ID is already used by another account.
+        // The server only answers taken:true/false — no account is ever named.
+        // Fail-open on network error: staff review remains the final authority.
+        const idTaken = await checkSeniorIdTaken(verificationSeniorId);
+        if (idTaken === true) {
+            goToKycStep('seniorid');
+            showSeniorIdTaken(document.getElementById('kycSeniorIdNumber'));
+            resetKycSubmitBtn();
+            return;
+        }
+
         const firstName = document.getElementById('kycFirstName').value.trim();
         const middleName = document.getElementById('kycMiddleName').value.trim();
         const lastName = document.getElementById('kycLastName').value.trim();
         const extension = document.getElementById('kycExtension').value.trim();
         const address = document.getElementById('kycAddress').value.trim();
-        const province = document.getElementById('kycProvince').value.trim();
-        const barangay = document.getElementById('kycBarangay').value.trim();
-        const city = document.getElementById('kycCity').value.trim();
+        // Enforce fixed service area (tamper-proof even via devtools).
+        const province = FIXED_PROVINCE;
+        const city = FIXED_CITY;
+        const barangay = (document.getElementById('kycBarangay').value || '').trim();
+        if (!barangay || !MAGALANG_BARANGAYS.includes(barangay)) {
+            showToast('⚠️ Please select a valid Magalang barangay.');
+            goToKycStep(1);
+            resetKycSubmitBtn();
+            return;
+        }
         const citizenship = document.getElementById('kycCitizenship').value.trim();
         const cpNumber = document.getElementById('kycCpNumber').value.trim();
         const dob = document.getElementById('kycDob').value;

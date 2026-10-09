@@ -7,6 +7,7 @@
     <title>Employee Dashboard | SilverCare</title>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/css/style.css">
+    <link rel="stylesheet" href="/css/staff-sidebar.css">
     <link rel="stylesheet" href="/css/process-benefits-board.css">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <style>
@@ -521,58 +522,59 @@
 </style>
 </head>
 
-<body>
+<body class="has-sidebar">
 
-    <!-- Unified Top Header & Navigation -->
+    <!-- Sidebar Shell (logo + vertical nav + user footer) -->
     <header style="display: flex; justify-content: space-between; align-items: center; padding: 0 40px; background: white; box-shadow: 0 4px 20px rgba(0,0,0,0.03); height: 100px; position: sticky; top: 0; z-index: 100; border-bottom: 1px solid #f1f5f9;">
         
         <!-- Brand / Logo -->
         <div style="display: flex; align-items: center; width: 250px;">
-            <img src="/images/logo.png" alt="SilverCare Logo" style="height: 45px; transform: scale(2.8); transform-origin: left center;">
+            <img src="/images/logo-wide.png" alt="SilverCare Logo" style="height: 70px; width: auto; max-width: 100%; object-fit: contain;">
         </div>
 
         <!-- Center Navigation Pills -->
         <nav style="display: flex; gap: 5px; background: #f8fafc; padding: 8px; border-radius: 50px; border: 1px solid #e2e8f0;">
-            <a class="emp-nav-pill active" onclick="switchEmpTab('dashboard', this)">Dashboard</a>
-            <a class="emp-nav-pill" onclick="switchEmpTab('register', this)">Register Senior</a>
+            <a class="emp-nav-pill active" onclick="switchEmpTab('dashboard', this)"><i class="fas fa-th-large"></i>Dashboard</a>
+            <a class="emp-nav-pill" onclick="switchEmpTab('register', this)"><i class="fas fa-user-plus"></i>Register Senior</a>
             <a class="emp-nav-pill" onclick="switchEmpTab('verify', this)" style="position: relative;">
-                Verify Documents
+                <i class="fas fa-clipboard-check"></i>Verify Documents
                 <span id="empVerifyBadge" style="display: none; position: absolute; top: 2px; right: 5px; width: 10px; height: 10px; background-color: #ef4444; border-radius: 50%; border: 2px solid white; box-shadow: 0 0 5px rgba(239, 68, 68, 0.5);"></span>
             </a>
             <a class="emp-nav-pill" onclick="switchEmpTab('process', this)" style="position: relative;">
-                Process Benefits
+                <i class="fas fa-hand-holding-dollar"></i>Process Benefits
                 <span id="empProcessBadge" style="display: none; position: absolute; top: 2px; right: 5px; width: 10px; height: 10px; background-color: #ef4444; border-radius: 50%; border: 2px solid white; box-shadow: 0 0 5px rgba(239, 68, 68, 0.5);"></span>
             </a>
             <a class="emp-nav-pill" onclick="switchEmpTab('health', this)" style="position: relative;">
-                Health Records
+                <i class="fas fa-notes-medical"></i>Health Records
                 <span id="empHealthBadge" style="display: none; position: absolute; top: 2px; right: 5px; width: 10px; height: 10px; background-color: #ef4444; border-radius: 50%; border: 2px solid white; box-shadow: 0 0 5px rgba(239, 68, 68, 0.5);"></span>
             </a>
 
             <a class="emp-nav-pill" onclick="switchEmpTab('archive', this)" title="Archive Function — inactive, deceased and transferred records">
-                <i class="fas fa-box-archive" style="margin-right: 6px;"></i>Archive
+                <i class="fas fa-box-archive"></i>Archive
             </a>
 
             <a class="emp-nav-pill" onclick="switchEmpTab('seniors', this)" title="Manage Seniors — view and edit senior account information">
-                <i class="fas fa-users" style="margin-right: 6px;"></i>Manage Seniors
+                <i class="fas fa-users"></i>Manage Seniors
             </a>
 
             <a class="emp-nav-pill" onclick="switchEmpTab('notifications', this)" style="position: relative;">
-                Notifications
+                <i class="fas fa-bell"></i>Notifications
                 <span id="empNotifBadge" style="display: none; position: absolute; top: 2px; right: 5px; width: 10px; height: 10px; background-color: #ef4444; border-radius: 50%; border: 2px solid white; box-shadow: 0 0 5px rgba(239, 68, 68, 0.5);"></span>
             </a>
         </nav>
 
-        <!-- Right Side User Menu -->
-        <div style="display: flex; align-items: center; gap: 20px; width: 250px; justify-content: flex-end;">
-            <div style="text-align: right; line-height: 1.2;">
-                <div style="font-size: 0.75rem; color: #64748b; font-weight: 700; letter-spacing: 1px; text-transform: uppercase;">Employee Portal</div>
-                <div id="employeeGreeting" style="font-size: 0.95rem; color: #1e293b; font-weight: 600; margin-top: 3px;">Loading...</div>
+        <!-- Sidebar User Footer -->
+        <div class="staff-user-footer" style="display: flex; align-items: center; gap: 20px; width: 250px; justify-content: flex-end;">
+            <div class="staff-user-card">
+                <div class="staff-avatar" id="employeeAvatar"><i class="fas fa-user-tie"></i></div>
+                <div class="staff-user-meta" style="min-width: 0; flex: 1;">
+                    <div id="employeeGreeting" class="staff-user-name">Loading...</div>
+                    <div class="staff-user-role"><span class="staff-role-dot"></span><span>Employee Portal</span></div>
+                </div>
             </div>
-            <div style="height: 35px; width: 1px; background: #cbd5e1;"></div>
-            <div id="logoutBtn" style="display: flex; flex-direction: column; align-items: center; justify-content: center; color: #ef4444; cursor: pointer; transition: 0.2s;" onmouseover="this.style.opacity='0.7'" onmouseout="this.style.opacity='1'">
-                <i class="fas fa-sign-out-alt" style="font-size: 1.2rem; margin-bottom: 3px;"></i>
-                <span style="font-size: 0.7rem; font-weight: 700;">LOGOUT</span>
-            </div>
+            <button type="button" id="logoutBtn" class="staff-logout-btn">
+                <i class="fas fa-sign-out-alt"></i><span>LOGOUT</span>
+            </button>
         </div>
     </header>
 
@@ -834,15 +836,44 @@
                                 </div>
                                 <div>
                                     <label style="display: block; font-size: 0.8rem; font-weight: 700; color: #475569; margin-bottom: 6px;">Barangay <span style="color: #ef4444;">*</span></label>
-                                    <input type="text" id="regBarangay" required placeholder="e.g. San Nicolas" style="width: 100%; padding: 12px 14px; border: 1.5px solid #e2e8f0; border-radius: 10px; font-size: 0.95rem; font-family: 'Inter', sans-serif; outline: none; box-sizing: border-box;" onfocus="this.style.borderColor='#3b82f6'" onblur="this.style.borderColor='#e2e8f0'">
+                                    <select id="regBarangay" required style="width: 100%; padding: 12px 14px; border: 1.5px solid #e2e8f0; border-radius: 10px; font-size: 0.95rem; font-family: 'Inter', sans-serif; outline: none; box-sizing: border-box; background: white;" onfocus="this.style.borderColor='#3b82f6'" onblur="this.style.borderColor='#e2e8f0'">
+                                        <option value="">-- Select Barangay --</option>
+                                        <option value="AYALA">AYALA</option>
+                                        <option value="BUCANAN">BUCANAN</option>
+                                        <option value="CAMIAS">CAMIAS</option>
+                                        <option value="DOLORES">DOLORES</option>
+                                        <option value="ESCALER">ESCALER</option>
+                                        <option value="LAPAZ">LAPAZ</option>
+                                        <option value="NAVALING">NAVALING</option>
+                                        <option value="SAN AGUSTIN">SAN AGUSTIN</option>
+                                        <option value="SAN ANTONIO">SAN ANTONIO</option>
+                                        <option value="SAN FRANCISCO">SAN FRANCISCO</option>
+                                        <option value="SAN ILDEFONSO">SAN ILDEFONSO</option>
+                                        <option value="SAN ISIDRO">SAN ISIDRO</option>
+                                        <option value="SAN JOSE">SAN JOSE</option>
+                                        <option value="SAN MIGUEL">SAN MIGUEL</option>
+                                        <option value="SAN NICOLAS 1">SAN NICOLAS 1</option>
+                                        <option value="SAN NICOLAS 2">SAN NICOLAS 2</option>
+                                        <option value="SAN PABLO">SAN PABLO</option>
+                                        <option value="SAN PEDRO 1">SAN PEDRO 1</option>
+                                        <option value="SAN PEDRO 2">SAN PEDRO 2</option>
+                                        <option value="SAN ROQUE">SAN ROQUE</option>
+                                        <option value="SAN VICENTE">SAN VICENTE</option>
+                                        <option value="STA. CRUZ">STA. CRUZ</option>
+                                        <option value="STA. LUCIA">STA. LUCIA</option>
+                                        <option value="STA. MARIA">STA. MARIA</option>
+                                        <option value="STO. NIÑO">STO. NIÑO</option>
+                                        <option value="STO. ROSARIO">STO. ROSARIO</option>
+                                        <option value="TURU">TURU</option>
+                                    </select>
                                 </div>
                                 <div>
                                     <label style="display: block; font-size: 0.8rem; font-weight: 700; color: #475569; margin-bottom: 6px;">City / Municipality <span style="color: #ef4444;">*</span></label>
-                                    <input type="text" id="regCity" required placeholder="e.g. Magalang" style="width: 100%; padding: 12px 14px; border: 1.5px solid #e2e8f0; border-radius: 10px; font-size: 0.95rem; font-family: 'Inter', sans-serif; outline: none; box-sizing: border-box;" onfocus="this.style.borderColor='#3b82f6'" onblur="this.style.borderColor='#e2e8f0'">
+                                    <input type="text" id="regCity" required value="Magalang" readonly tabindex="-1" title="Fixed to Magalang" style="width: 100%; padding: 12px 14px; border: 1.5px solid #e2e8f0; border-radius: 10px; font-size: 0.95rem; font-family: 'Inter', sans-serif; outline: none; box-sizing: border-box; background: #e2e8f0; color: #64748b; cursor: not-allowed;">
                                 </div>
                                 <div>
                                     <label style="display: block; font-size: 0.8rem; font-weight: 700; color: #475569; margin-bottom: 6px;">Province <span style="color: #ef4444;">*</span></label>
-                                    <input type="text" id="regProvince" required placeholder="e.g. Pampanga" style="width: 100%; padding: 12px 14px; border: 1.5px solid #e2e8f0; border-radius: 10px; font-size: 0.95rem; font-family: 'Inter', sans-serif; outline: none; box-sizing: border-box;" onfocus="this.style.borderColor='#3b82f6'" onblur="this.style.borderColor='#e2e8f0'">
+                                    <input type="text" id="regProvince" required value="Pampanga" readonly tabindex="-1" title="Fixed to Pampanga" style="width: 100%; padding: 12px 14px; border: 1.5px solid #e2e8f0; border-radius: 10px; font-size: 0.95rem; font-family: 'Inter', sans-serif; outline: none; box-sizing: border-box; background: #e2e8f0; color: #64748b; cursor: not-allowed;">
                                 </div>
                                 <div>
                                     <label style="display: block; font-size: 0.8rem; font-weight: 700; color: #475569; margin-bottom: 6px;">Postal Code <span style="color: #ef4444;">*</span></label>

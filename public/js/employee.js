@@ -626,6 +626,8 @@ document.addEventListener('DOMContentLoaded', () => {
             } else {
                 document.getElementById('employeeGreeting').textContent = `Welcome, Staff!`;
             }
+            const empAvatar = document.getElementById('employeeAvatar');
+            if (empAvatar) empAvatar.textContent = (staffName || 'S').trim().charAt(0).toUpperCase();
             window.currentStaffName = staffName;
 
             // Real-time MAINTENANCE MODE watcher
@@ -993,9 +995,20 @@ document.addEventListener('DOMContentLoaded', () => {
             const sex = document.getElementById('regSex').value;
             const civilStatus = document.getElementById('regCivil').value;
             const address = document.getElementById('regAddress').value.trim();
-            const barangay = document.getElementById('regBarangay').value.trim();
-            const city = document.getElementById('regCity').value.trim();
-            const province = document.getElementById('regProvince').value.trim();
+            // Fixed service area: Magalang, Pampanga only (fields are read-only).
+            const MAGALANG_BARANGAYS = ['AYALA','BUCANAN','CAMIAS','DOLORES','ESCALER','LAPAZ','NAVALING','SAN AGUSTIN','SAN ANTONIO','SAN FRANCISCO','SAN ILDEFONSO','SAN ISIDRO','SAN JOSE','SAN MIGUEL','SAN NICOLAS 1','SAN NICOLAS 2','SAN PABLO','SAN PEDRO 1','SAN PEDRO 2','SAN ROQUE','SAN VICENTE','STA. CRUZ','STA. LUCIA','STA. MARIA','STO. NIÑO','STO. ROSARIO','TURU'];
+            const barangay = (document.getElementById('regBarangay').value || '').trim();
+            const city = 'Magalang';
+            const province = 'Pampanga';
+            const regCityEl = document.getElementById('regCity');
+            const regProvEl = document.getElementById('regProvince');
+            if (regCityEl) regCityEl.value = city;
+            if (regProvEl) regProvEl.value = province;
+            if (!barangay || !MAGALANG_BARANGAYS.includes(barangay)) {
+                scNotify('warning', 'Please select a valid Magalang barangay.');
+                document.getElementById('regBarangay').focus();
+                return;
+            }
             const postalCode = document.getElementById('regPostalCode').value.trim();
             const citizenship = document.getElementById('regCitizenship').value;
             const cpNumber = document.getElementById('regCpNumber').value.trim();
