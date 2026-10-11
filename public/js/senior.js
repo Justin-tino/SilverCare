@@ -2619,6 +2619,8 @@ document.addEventListener('DOMContentLoaded', () => {
     if (apptBookBtn) {
         const dateInput = document.getElementById('apptDate');
         if (dateInput) dateInput.min = new Date().toISOString().slice(0, 10);
+        // Custom working-day calendar (Mon–Wed) replaces the native date input.
+        initApptCalendar('appt');
         apptBookBtn.addEventListener('click', async () => {
             const date = document.getElementById('apptDate')?.value || '';
             const time = document.getElementById('apptTime')?.value || '';
@@ -2626,6 +2628,16 @@ document.addEventListener('DOMContentLoaded', () => {
             const note = document.getElementById('apptNote')?.value.trim() || '';
             if (!date || !time) { showToast('⚠️ Please select a visit date and time.'); return; }
             if (!service) { showToast('⚠️ Please enter purpose of visit.'); return; }
+            // Working-day guard (client side mirror of the server rule).
+            {
+                const d = new Date(date + 'T00:00:00');
+                const day = d.getDay();
+                const names = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+                if (day < 1 || day > 4) {
+                    showToast(`⚠️ ${names[day]} is a closed day. OSCA Magalang accepts appointments Monday to Thursday only.`);
+                    return;
+                }
+            }
             if (document.getElementById('apptPendingAlert')?.style.display === 'block') {
                 const txt = document.getElementById('apptPendingAlertText')?.textContent || 'You still have a pending booking. Please reschedule or cancel it before booking a new one.';
                 showToast('⚠️ ' + txt);
@@ -2677,6 +2689,10 @@ document.addEventListener('DOMContentLoaded', () => {
         const modal = document.getElementById('apptReschedModal');
         const dateEl = document.getElementById('apptReschedDate');
         if (dateEl) dateEl.min = new Date().toISOString().slice(0, 10);
+        // Same working-day calendar as booking; reset so an old pick never lingers.
+        initApptCalendar('resched');
+        const reschedWrap = document.getElementById('reschedCalWrap');
+        if (reschedWrap && reschedWrap.reset) reschedWrap.reset();
         if (modal) modal.style.display = 'flex';
     }
 
@@ -2695,6 +2711,15 @@ document.addEventListener('DOMContentLoaded', () => {
             const date = document.getElementById('apptReschedDate')?.value || '';
             const time = document.getElementById('apptReschedTime')?.value || '';
             if (!date || !time) { showToast('⚠️ Please select a new date and time.'); return; }
+            {
+                const d = new Date(date + 'T00:00:00');
+                const day = d.getDay();
+                const names = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+                if (day < 1 || day > 4) {
+                    showToast(`⚠️ ${names[day]} is a closed day. OSCA Magalang accepts appointments Monday to Thursday only.`);
+                    return;
+                }
+            }
             apptReschedConfirmBtn.disabled = true;
             try {
                 const headers = await seniorAuthHeaders();
@@ -3302,6 +3327,10 @@ document.addEventListener('DOMContentLoaded', () => {
     // followed by the required Senior Citizen ID field.
     function buildMilestoneFormHtml(category, options = {}) {
         const prefillAge = options.prefillAge || '';
+        // Milestone-age choices removed: the milestone is derived from the
+        // auto-computed age (A.5), so a manual "Applicant Milestone Age"
+        // dropdown was redundant and blocked seniors who left it on the
+        // "Select milestone age" placeholder.
         const defaultMilestoneAge = options.defaultMilestoneAge || 80;
         // Annex A name sync: Step-1 inputs (already typed) first, stored record as fallback.
         const step1Val = (id) => (document.getElementById(id)?.value || '').trim();
@@ -3316,20 +3345,6 @@ document.addEventListener('DOMContentLoaded', () => {
         const defaultCivil = currentUserData ? (currentUserData.civilStatus || 'Married') : 'Married';
         // Annex A address lock: barangay mirrors the Step-1 verification selection.
         const defaultBarangay = getStep1Barangay();
-
-        // Milestone-age choices: category-specific when a category applies,
-        // otherwise every milestone age (uncategorized "Verification Form").
-        const milestoneChoices = category === 'Octogenarian' ? [80, 85]
-            : category === 'Nonagenarian' ? [90, 95]
-            : category === 'Centenarian' ? [100]
-            : [80, 85, 90, 95, 100];
-        const milestoneOptions = category
-            ? milestoneChoices.map(val =>
-                `<option value="${val}" ${val === defaultMilestoneAge ? 'selected' : ''}>${val}</option>`
-            ).join('')
-            : `<option value="" disabled selected>Select milestone age</option>` + milestoneChoices.map(val =>
-                `<option value="${val}">${val}</option>`
-            ).join('');
 
         // Title mirrors the interstitial header: the category name when a
         // category applies, "Verification Form" otherwise.
@@ -3350,12 +3365,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 <div class="form-group">
                     <label for="oscaIdNum">OSCA ID Number *</label>
                     <input type="text" id="oscaIdNum" value="${defaultId}" required>
-                </div>
-                <div class="form-group">
-                    <label for="milestoneAge">Applicant Milestone Age *</label>
-                    <select id="milestoneAge" required>
-                        ${milestoneOptions}
-                    </select>
                 </div>
             </div>
         `;
@@ -3654,6 +3663,121 @@ document.addEventListener('DOMContentLoaded', () => {
     // Benefit interstitial (see the kycNextBtn handler below).
     // NOTE: the Step-4 Senior Citizen ID Number field lives in the static HTML
     // (id="kycSeniorIdNumber") and is intentionally NOT part of this template.
+
+    // ── Appointment working-day rule: OSCA Magalang is open Monday–Wednesday.
+    // Native <input type="date"> cannot disable individual weekdays, so both
+    // appointment fields use this custom picker: closed days (Thu–Sun) render
+    // struck-through and are NOT clickable, and past dates are disabled too.
+    // The chosen ISO value lands in a hidden input, so every existing reader of
+    // #apptDate / #apptReschedDate keeps working untouched. Server re-validates.
+    const APPT_DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+    function initApptCalendar(prefix) {
+        const input = document.getElementById(prefix === 'appt' ? 'apptDate' : 'apptReschedDate');
+        const wrap = document.getElementById(prefix + 'CalWrap');
+        const trigger = document.getElementById(prefix + 'CalTrigger');
+        const label = document.getElementById(prefix + 'CalLabel');
+        const panel = document.getElementById(prefix + 'CalPanel');
+        const grid = document.getElementById(prefix + 'CalGrid');
+        const monthEl = document.getElementById(prefix + 'CalMonth');
+        const prevBtn = document.getElementById(prefix + 'CalPrev');
+        const nextBtn = document.getElementById(prefix + 'CalNext');
+        if (!input || !wrap || !trigger || !panel || !grid) return;
+        if (wrap.dataset.calWired) return;   // one instance per field
+        wrap.dataset.calWired = '1';
+
+        const pad = (n) => String(n).padStart(2, '0');
+        const isoOf = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+        const isClosed = (d) => d.getDay() < 1 || d.getDay() > 4;
+        const today = () => {
+            const t = new Date();
+            return new Date(t.getFullYear(), t.getMonth(), t.getDate());
+        };
+
+        let view = new Date();
+        let selected = null;
+        if (/^\d{4}-\d{2}-\d{2}$/.test(input.value)) selected = new Date(input.value + 'T00:00:00');
+
+        function paintLabel() {
+            if (selected) {
+                label.textContent = selected.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric', year: 'numeric' });
+                trigger.classList.remove('is-empty');
+            } else {
+                label.textContent = 'Select visit date';
+                trigger.classList.add('is-empty');
+            }
+        }
+        function render() {
+            monthEl.textContent = view.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+            grid.innerHTML = '';
+            ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'].forEach((n) => {
+                const h = document.createElement('div');
+                h.className = 'appt-cal-dow';
+                h.textContent = n;
+                grid.appendChild(h);
+            });
+            const first = new Date(view.getFullYear(), view.getMonth(), 1);
+            for (let i = 0; i < first.getDay(); i++) grid.appendChild(document.createElement('div'));
+            const total = new Date(view.getFullYear(), view.getMonth() + 1, 0).getDate();
+            const t0 = today();
+            for (let d = 1; d <= total; d++) {
+                const cell = new Date(view.getFullYear(), view.getMonth(), d);
+                const b = document.createElement('button');
+                b.type = 'button';
+                b.className = 'appt-cal-day';
+                b.textContent = d;
+                const past = cell < t0;
+                if (past || isClosed(cell)) {
+                    b.disabled = true;
+                    b.classList.add(isClosed(cell) ? 'is-closed' : 'is-past');
+                    b.title = isClosed(cell) ? 'Closed day — OSCA is open Monday to Thursday only' : 'Past date';
+                } else {
+                    if (selected && isoOf(cell) === isoOf(selected)) b.classList.add('is-selected');
+                    b.addEventListener('click', () => {
+                        selected = cell;
+                        input.value = isoOf(cell);
+                        input.dispatchEvent(new Event('change', { bubbles: true }));
+                        paintLabel();
+                        render();
+                        panel.classList.remove('open');
+                        trigger.setAttribute('aria-expanded', 'false');
+                    });
+                }
+                grid.appendChild(b);
+            }
+        }
+        function open() {
+            panel.classList.add('open');
+            trigger.setAttribute('aria-expanded', 'true');
+            view = selected ? new Date(selected.getFullYear(), selected.getMonth(), 1) : new Date();
+            render();
+        }
+        function close() {
+            panel.classList.remove('open');
+            trigger.setAttribute('aria-expanded', 'false');
+        }
+
+        trigger.addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (panel.classList.contains('open')) close(); else open();
+        });
+        if (prevBtn) prevBtn.addEventListener('click', (e) => { e.stopPropagation(); view.setMonth(view.getMonth() - 1); render(); });
+        if (nextBtn) nextBtn.addEventListener('click', (e) => { e.stopPropagation(); view.setMonth(view.getMonth() + 1); render(); });
+        // Close on any outside click (one listener for all calendars).
+        document.addEventListener('click', (e) => { if (!wrap.contains(e.target)) close(); });
+        document.addEventListener('keydown', (e) => { if (e.key === 'Escape') close(); });
+
+        paintLabel();
+        render();
+        // Expose a reset so the reschedule modal can clear its previous pick.
+        if (prefix !== 'appt') {
+            wrap.reset = () => {
+                selected = null;
+                input.value = '';
+                paintLabel();
+                render();
+            };
+        }
+    }
 
     // ── Senior ID Back-to-Back Upload (Step 4, required) ─────────────────────
     // Shared UI update for both gallery upload and camera capture.
@@ -4796,11 +4920,20 @@ document.addEventListener('DOMContentLoaded', () => {
         // ── Duplicate Senior ID block (privacy-safe) ──
         // Notifies the senior when the ID is already used by another account.
         // The server only answers taken:true/false — no account is ever named.
-        // Fail-open on network error: staff review remains the final authority.
+        // FAIL-CLOSED: if the check itself fails, submission stops. A duplicate ID
+        // slipping into the records is worse than a senior waiting to retry
+        // (staff review could still miss it, and both records would share an ID).
         const idTaken = await checkSeniorIdTaken(verificationSeniorId);
-        if (idTaken === true) {
+        if (idTaken !== false) {
+            if (idTaken === true) {
+                showSeniorIdTaken(document.getElementById('kycSeniorIdNumber'));
+            } else {
+                showToast('⚠️ We could not verify your Senior ID right now. Please try again in a moment.');
+                const sidErr = document.getElementById('kycSeniorIdError');
+                if (sidErr) { sidErr.textContent = 'Unable to check this ID right now. Please press Submit again in a moment.'; sidErr.style.display = 'block'; }
+            }
             goToKycStep('seniorid');
-            showSeniorIdTaken(document.getElementById('kycSeniorIdNumber'));
+            document.getElementById('kycSeniorIdNumber')?.focus();
             resetKycSubmitBtn();
             return;
         }

@@ -33,6 +33,64 @@ document.addEventListener('DOMContentLoaded', () => {
     // --- Store form data temporarily (create account AFTER OTP, not before) ---
     let pendingSignup = null;
 
+    // ── Duplicate Senior ID helpers (signup form) ──
+    // Returns true (taken), false (free), or null (check failed → caller blocks).
+    async function isSeniorIdTakenPublic(seniorId) {
+        try {
+            const controller = new AbortController();
+            const timer = setTimeout(() => controller.abort(), 15000);
+            let res;
+            try {
+                res = await fetch('/api/check-senior-id-public', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ seniorId }),
+                    signal: controller.signal
+                });
+            } finally {
+                clearTimeout(timer);
+            }
+            const data = await res.json();
+            if (data && data.success) return !!data.taken;
+            return null;
+        } catch (err) {
+            console.warn('Senior ID check failed:', err);
+            return null;
+        }
+    }
+    function showSeniorIdTaken(inputId, errId, message) {
+        const err = document.getElementById(errId);
+        if (err) { err.textContent = message; err.style.display = 'block'; }
+        const field = document.getElementById(inputId);
+        if (field) { field.style.borderColor = '#dc2626'; field.style.boxShadow = '0 0 0 3px rgba(220, 38, 38, 0.1)'; field.focus(); }
+    }
+    function clearSeniorIdTaken(inputId, errId) {
+        const err = document.getElementById(errId);
+        if (err) err.style.display = 'none';
+        const field = document.getElementById(inputId);
+        if (field) { field.style.borderColor = ''; field.style.boxShadow = ''; }
+    }
+
+    // Live re-check when the senior edits the ID again (typing clears the warning).
+    const signupSeniorIdField = document.getElementById('seniorId');
+    if (signupSeniorIdField) {
+        let blurCheck = null;
+        const liveCheck = async () => {
+            const v = signupSeniorIdField.value.trim();
+            if (!v) { clearSeniorIdTaken('seniorId', 'seniorIdTakenError'); return; }
+            blurCheck = await isSeniorIdTakenPublic(v);
+            if (blurCheck === true) {
+                showSeniorIdTaken('seniorId', 'seniorIdTakenError',
+                    'This Senior ID number is already in use. Please check the number on your ID card.');
+            } else if (blurCheck === false) {
+                clearSeniorIdTaken('seniorId', 'seniorIdTakenError');
+            }
+        };
+        signupSeniorIdField.addEventListener('input', () => clearSeniorIdTaken('seniorId', 'seniorIdTakenError'));
+        signupSeniorIdField.addEventListener('change', liveCheck);
+        signupSeniorIdField.addEventListener('blur', liveCheck);
+    }
+
     // --- Signup Form Submission ---
     const signupForm = document.getElementById('signupForm');
     if (signupForm) {
@@ -64,6 +122,23 @@ document.addEventListener('DOMContentLoaded', () => {
                 seniorId = document.getElementById('seniorId').value.trim();
                 if (!seniorId) {
                     showWarning("Please enter your Senior Citizen ID Number.");
+                    return;
+                }
+            }
+
+            // ── Duplicate Senior ID check (BLOCKING) ──
+            // Public endpoint (not signed in yet). Boolean-only answer — never
+            // names the existing account. If the check cannot be completed we
+            // BLOCK rather than letting a duplicate through.
+            if (role === 'senior') {
+                const taken = await isSeniorIdTakenPublic(seniorId);
+                if (taken) {
+                    showSeniorIdTaken('seniorId', 'seniorIdTakenError',
+                        'This Senior ID number is already in use. Please check the number on your ID card, or visit the OSCA Magalang office for help.');
+                    return;
+                }
+                if (taken === null) {
+                    showError('We could not verify your Senior ID right now. Please try again in a moment.');
                     return;
                 }
             }

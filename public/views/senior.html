@@ -256,6 +256,46 @@
             line-height: 1.3;
         }
         /* Sidebar profile card (bottom of the left sidebar, like employee / admin) */
+        /* ── Custom working-day calendar (Mon–Wed only) ──
+           Native <input type="date"> cannot disable individual weekdays, so
+           both appointment fields use this picker with closed days unclickable. */
+        .appt-cal { position: relative; }
+        .appt-cal-trigger {
+            width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 8px;
+            padding: 10px 12px; border: 1px solid #cbd5e1; border-radius: 8px; background: #fff;
+            font-size: 0.92rem; font-family: inherit; color: #1e293b; cursor: pointer; text-align: left;
+        }
+        .appt-cal-trigger:hover { border-color: #93c5fd; }
+        .appt-cal-trigger.is-empty { color: #94a3b8; }
+        .appt-cal-trigger i { color: #64748b; }
+        .appt-cal-panel {
+            display: none; position: absolute; top: calc(100% + 6px); left: 0; z-index: 1200;
+            width: 268px; padding: 12px; background: #fff; border: 1px solid #e2e8f0;
+            border-radius: 12px; box-shadow: 0 12px 32px rgba(15, 23, 42, 0.18);
+        }
+        .appt-cal-panel.open { display: block; }
+        .appt-cal-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+        .appt-cal-head > span { font-size: 0.85rem; font-weight: 800; color: #1e293b; }
+        .appt-cal-head button {
+            border: none; background: #f1f5f9; color: #475569; width: 26px; height: 26px;
+            border-radius: 8px; cursor: pointer; font-size: 0.7rem; display: flex; align-items: center; justify-content: center;
+        }
+        .appt-cal-head button:hover { background: #e2e8f0; }
+        .appt-cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
+        .appt-cal-dow { text-align: center; font-size: 0.62rem; font-weight: 800; color: #94a3b8; padding: 4px 0; text-transform: uppercase; }
+        .appt-cal-day {
+            border: none; background: #f8fafc; color: #334155; aspect-ratio: 1; border-radius: 8px;
+            font-size: 0.78rem; font-weight: 600; cursor: pointer; font-family: inherit;
+            display: flex; align-items: center; justify-content: center;
+        }
+        .appt-cal-day:hover:not(:disabled) { background: #dbeafe; color: #1d4ed8; }
+        .appt-cal-day.is-selected { background: #2563eb; color: #fff; font-weight: 800; }
+        /* Closed days (Thu–Sun) + past dates are visibly blocked and unclickable */
+        .appt-cal-day:disabled { cursor: not-allowed; }
+        .appt-cal-day.is-closed { background: #f1f5f9; color: #cbd5e1; text-decoration: line-through; }
+        .appt-cal-day.is-past { background: transparent; color: #e2e8f0; }
+        .appt-cal-note { margin-top: 10px; font-size: 0.68rem; color: #64748b; font-weight: 600; text-align: center; line-height: 1.4; }
+
         .sidebar-profile {
             margin-top: auto;
             padding: 16px 12px 14px;
@@ -2780,7 +2820,22 @@
                                 <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px; margin-top:14px;">
                                     <div>
                                         <label style="display:block; font-size:0.78rem; font-weight:700; color:#475569; margin-bottom:4px;">Visit date *</label>
-                                        <input type="date" id="apptDate" style="width:100%; padding:10px 12px; border:1px solid #cbd5e1; border-radius:8px; font-size:0.92rem; box-sizing:border-box;">
+                                        <div class="appt-cal" id="apptCalWrap">
+                                            <button type="button" class="appt-cal-trigger is-empty" id="apptCalTrigger">
+                                                <span id="apptCalLabel">Select visit date</span>
+                                                <i class="fas fa-calendar-days"></i>
+                                            </button>
+                                            <div class="appt-cal-panel" id="apptCalPanel">
+                                                <div class="appt-cal-head">
+                                                    <button type="button" id="apptCalPrev" aria-label="Previous month"><i class="fas fa-chevron-left"></i></button>
+                                                    <span id="apptCalMonth">Month</span>
+                                                    <button type="button" id="apptCalNext" aria-label="Next month"><i class="fas fa-chevron-right"></i></button>
+                                                </div>
+                                                <div class="appt-cal-grid" id="apptCalGrid"></div>
+                                                <div class="appt-cal-note">Open Monday – Thursday only<br>Fri, Sat &amp; Sun are closed</div>
+                                            </div>
+                                            <input type="hidden" id="apptDate">
+                                        </div>
                                     </div>
                                     <div>
                                         <label style="display:block; font-size:0.78rem; font-weight:700; color:#475569; margin-bottom:4px;">Time *</label>
@@ -2896,7 +2951,22 @@
                             <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
                                 <div>
                                     <label style="display:block; font-size:0.78rem; font-weight:700; color:#475569; margin-bottom:4px;">New date *</label>
-                                    <input type="date" id="apptReschedDate" style="width:100%; padding:10px 12px; border:1px solid #cbd5e1; border-radius:8px; box-sizing:border-box;">
+                                    <div class="appt-cal" id="reschedCalWrap">
+                                        <button type="button" class="appt-cal-trigger is-empty" id="reschedCalTrigger">
+                                            <span id="reschedCalLabel">Select visit date</span>
+                                            <i class="fas fa-calendar-days"></i>
+                                        </button>
+                                        <div class="appt-cal-panel" id="reschedCalPanel">
+                                            <div class="appt-cal-head">
+                                                <button type="button" id="reschedCalPrev" aria-label="Previous month"><i class="fas fa-chevron-left"></i></button>
+                                                <span id="reschedCalMonth">Month</span>
+                                                <button type="button" id="reschedCalNext" aria-label="Next month"><i class="fas fa-chevron-right"></i></button>
+                                            </div>
+                                            <div class="appt-cal-grid" id="reschedCalGrid"></div>
+                                            <div class="appt-cal-note">Open Monday – Thursday only<br>Fri, Sat &amp; Sun are closed</div>
+                                        </div>
+                                        <input type="hidden" id="apptReschedDate">
+                                    </div>
                                 </div>
                                 <div>
                                     <label style="display:block; font-size:0.78rem; font-weight:700; color:#475569; margin-bottom:4px;">New time *</label>

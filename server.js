@@ -315,6 +315,7 @@ const SMS_MAX_LENGTH = 480;
 const SMS_NOTIFICATION_TYPES = [
     'pension_approved', 'pension_releasing', 'pension_released', 'pension_declined',
     'claim_approved', 'claim_releasing', 'claim_released', 'claim_declined',
+    'appointment_booked',
     'announcement'
 ];
 
@@ -450,6 +451,9 @@ function buildStatusSms({ type, name, amount, localAmount, nationalAmount, quart
 
         case 'claim_declined':
             return `SilverCare OSCA: ${who}, your ${svc || 'ASSISTANCE'} request was DECLINED. ${smsSafe(reason, 110) || 'Please visit the OSCA Magalang office with your documents.'}${repo}${tail}`;
+
+        case 'appointment_booked':
+            return `SilverCare OSCA: ${who}, your request has been received. Please visit the OSCA office within working days to process your request.${tail}`;
 
         case 'announcement': {
             const custom = smsSafe(message, 300);
@@ -1566,6 +1570,22 @@ app.post('/api/check-senior-duplicate', requireAuth, requireRole('admin', 'emplo
     }
 });
 
+// --- Senior ID uniqueness helper (shared by both duplicate checks) ---
+// Case/whitespace-insensitive match on seniorId AND verificationSeniorId
+// (the latter catches IDs still going through verification).
+async function isSeniorIdTaken(normId, ignoreUid) {
+    const id = String(normId || '').trim().toUpperCase();
+    if (!id) return false;
+    const snap = await admin.database().ref('users').orderByChild('role').equalTo('senior').once('value');
+    const users = snap.val() || {};
+    for (const [uid, u] of Object.entries(users)) {
+        if (ignoreUid && uid === ignoreUid) continue;
+        if (String(u.seniorId || '').trim().toUpperCase() === id) return true;
+        if (String(u.verificationSeniorId || '').trim().toUpperCase() === id) return true;
+    }
+    return false;
+}
+
 // --- API: Senior self-check — is this Senior ID already used by someone else? ---
 // Senior role may call this during verification. Returns ONLY a boolean —
 // never the other account's name, uid, or any personal detail.
@@ -1573,17 +1593,41 @@ app.post('/api/check-senior-id', requireAuth, requireRole('senior'), async (req,
     try {
         const normId = String((req.body || {}).seniorId || '').trim().toUpperCase();
         if (!normId) return res.json({ success: true, taken: false });
-        const snap = await admin.database().ref('users').orderByChild('role').equalTo('senior').once('value');
-        const users = snap.val() || {};
-        const me = req.authUser.uid;
-        for (const [uid, u] of Object.entries(users)) {
-            if (uid === me) continue;
-            if (String(u.seniorId || '').trim().toUpperCase() === normId) return res.json({ success: true, taken: true });
-            if (String(u.verificationSeniorId || '').trim().toUpperCase() === normId) return res.json({ success: true, taken: true });
-        }
-        res.json({ success: true, taken: false });
+        const taken = await isSeniorIdTaken(normId, req.authUser.uid);
+        res.json({ success: true, taken });
     } catch (error) {
         console.error('Senior ID check error:', error);
+        res.status(500).json({ success: false, message: 'Failed to check Senior ID.' });
+    }
+});
+
+// --- API: Public duplicate Senior ID check (used by the signup form) ---
+// A senior is NOT logged in yet at signup, so this endpoint is public.
+// It answers taken:true/false ONLY and is rate-limited per IP so valid
+// Senior IDs cannot simply be enumerated.
+const ID_CHECK_WINDOW_MS = 60 * 1000;
+const ID_CHECK_LIMIT = 20;
+const idCheckBuckets = new Map();
+function idCheckAllowed(ip) {
+    const now = Date.now();
+    const key = String(ip || 'unknown');
+    const recent = (idCheckBuckets.get(key) || []).filter(t => now - t < ID_CHECK_WINDOW_MS);
+    recent.push(now);
+    idCheckBuckets.set(key, recent);
+    return recent.length <= ID_CHECK_LIMIT;
+}
+app.post('/api/check-senior-id-public', async (req, res) => {
+    try {
+        const ip = String(req.headers['x-forwarded-for'] || (req.socket && req.socket.remoteAddress) || 'unknown').split(',')[0].trim();
+        if (!idCheckAllowed(ip)) {
+            return res.status(429).json({ success: false, message: 'Too many checks. Please wait a moment and try again.' });
+        }
+        const normId = String((req.body || {}).seniorId || '').trim().toUpperCase();
+        if (!normId) return res.json({ success: true, taken: false });
+        const taken = await isSeniorIdTaken(normId, null);
+        res.json({ success: true, taken });
+    } catch (error) {
+        console.error('Public Senior ID check error:', error);
         res.status(500).json({ success: false, message: 'Failed to check Senior ID.' });
     }
 });
@@ -3547,11 +3591,29 @@ app.get('/api/queues/:uid', requireAuth, async (req, res) => {
 });
 
 // --- API: Book a queue appointment (senior only; own) ---
+// --- Appointment working days: Monday to Thursday only ---
+// Thursday–Sunday are closed (office hours). Returns a friendly message so
+// both the API and the UI can tell the senior which days to pick.
+function isWorkingDay(dateStr) {
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(dateStr || '').trim());
+    if (!m) return { ok: false, message: 'Invalid visit date.' };
+    // Build a LOCAL date so getDay() reflects the actual calendar day and is
+    // never shifted by UTC parsing.
+    const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+    const day = d.getDay(); // 0 Sun ... 6 Sat
+    if (day < 1 || day > 4) {
+        return { ok: false, message: 'OSCA Magalang is open Monday to Thursday only. Please pick a Monday, Tuesday, Wednesday or Thursday visit date.' };
+    }
+    return { ok: true, weekday: day };
+}
+
 app.post('/api/queue/book', requireAuth, requireRole('senior'), async (req, res) => {
     const { date, time, service, note } = req.body;
     const actor = req.authUser;
     try {
         if (!date || !time) return res.status(400).json({ success: false, message: 'date and time are required.' });
+        const workDay = isWorkingDay(date);
+        if (!workDay.ok) return res.status(400).json({ success: false, message: workDay.message });
         const scheduledAt = new Date(`${date}T${time}`).getTime();
         if (isNaN(scheduledAt)) return res.status(400).json({ success: false, message: 'Invalid date/time format.' });
         if (scheduledAt < Date.now()) return res.status(400).json({ success: false, message: 'Cannot book a past appointment.' });
@@ -3626,7 +3688,16 @@ app.post('/api/queue/book', requireAuth, requireRole('senior'), async (req, res)
             });
         } catch (e) { console.warn('Booking mirror skipped:', e.message); }
 
-        res.json({ success: true, message: 'Appointment booked.', queueId: id, queueNumber });
+        // SMS confirmation to the senior's own CP number (best-effort — never
+        // rolls back a booking that is already saved).
+        try {
+            const sms = await notifySeniorSms(actor.uid, 'appointment_booked');
+            console.log(sms.sent
+                ? `Appointment SMS sent to ${sms.to} for queue ${queueNumber}.`
+                : `Appointment SMS skipped: ${sms.reason}`);
+        } catch (e) { console.warn('Appointment SMS skipped:', e.message); }
+
+        res.json({ success: true, message: 'Appointment booked.', queueId: id, queueNumber, smsSent: true });
     } catch (error) {
         console.error('Book queue error:', error);
         res.status(500).json({ success: false, message: 'Failed to book appointment.' });
@@ -3645,6 +3716,8 @@ app.put('/api/queue/:queueId/reschedule', requireAuth, requireRole('senior'), as
         const scheduledAt = new Date(`${date}T${time}`).getTime();
         if (isNaN(scheduledAt)) return res.status(400).json({ success: false, message: 'Invalid date/time format.' });
         if (scheduledAt < Date.now()) return res.status(400).json({ success: false, message: 'Cannot reschedule to a past slot.' });
+        const workDay = isWorkingDay(date);
+        if (!workDay.ok) return res.status(400).json({ success: false, message: workDay.message });
         const queueRef = admin.database().ref(`queue/${queueId}`);
         const snap = await queueRef.once('value');
         if (!snap.exists()) return res.status(404).json({ success: false, message: 'Queue appointment not found.' });
