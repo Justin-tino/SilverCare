@@ -2328,6 +2328,31 @@ function getNationalPensionOf(u) {
 // National only, or both. Any component > 0 counts as "pension granted".
 function hasPension(u) { return getLocalPensionOf(u) > 0 || getNationalPensionOf(u) > 0; }
 function quarterTotalOf(u) { return getLocalPensionOf(u) * 3 + getNationalPensionOf(u); }
+
+// Pension payouts are approved once per release month. The period key matches
+// the YYYY-MM value that the Senior Portal and Admin dashboard already use for
+// lastPensionMonth, so approving here updates all three views.
+function currentPensionPeriodKey() {
+    return new Date().toISOString().substring(0, 7);
+}
+function pensionPeriodLabel(periodKey) {
+    const m = /^(\d{4})-(\d{2})$/.exec(String(periodKey || ''));
+    if (!m) return 'this month';
+    return new Date(Number(m[1]), Number(m[2]) - 1, 1)
+        .toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+}
+function hasPensionPayoutForPeriod(u, periodKey) {
+    const benefits = (u && u.benefits && typeof u.benefits === 'object') ? u.benefits : {};
+    return Object.values(benefits).some(b =>
+        b && /pension/i.test(String(b.title || '')) && String(b.period || '') === String(periodKey || ''));
+}
+function pensionPayoutTitle(local, national) {
+    const parts = [];
+    if (Number(local) > 0) parts.push('Local');
+    if (Number(national) > 0) parts.push('National');
+    return (parts.join(' + ') || 'Local + National') + ' Pension';
+}
+
 function refreshPensionSettingsPreview() {
     const li = document.getElementById('pensionLocalInput');
     const ni = document.getElementById('pensionNationalInput');
@@ -2538,16 +2563,24 @@ function renderPensionSetup(usersData) {
                             <th style="padding:8px 10px; font-weight:600;">Senior Name</th>
                             <th style="padding:8px 10px; font-weight:600;">OSCA ID</th>
                             <th style="padding:8px 10px; font-weight:600;">Priority</th>
-                            <th style="padding:8px 10px; font-weight:600;">Local (Monthly)</th>
-                            <th style="padding:8px 10px; font-weight:600;">National (Quarterly)</th>
+                            <th style="padding:8px 10px; font-weight:600;">Local (₱/mo)</th>
+                            <th style="padding:8px 10px; font-weight:600;">National (₱/qtr)</th>
                             <th style="padding:8px 10px; font-weight:600;">Quarterly Total</th>
                             <th style="padding:8px 10px; font-weight:600;">Set On</th>
                             <th style="padding:8px 10px; font-weight:600;">Set By</th>
-                            <th style="padding:8px 10px; font-weight:600; width:90px;"></th>
+                            <th class="pb-pension-actions" style="padding:8px 10px; font-weight:600; width:116px;"></th>
                         </tr>
                     </thead>
                     <tbody>
-                    ${configured.map(s => { const _l = getLocalPensionOf(s); const _n = getNationalPensionOf(s); const _q = _l * 3 + _n; return `
+                    ${configured.map(s => {
+                        const _l = getLocalPensionOf(s);
+                        const _n = getNationalPensionOf(s);
+                        const _q = _l * 3 + _n;
+                        const _period = currentPensionPeriodKey();
+                        const _periodLabel = pensionPeriodLabel(_period);
+                        const _approved = (String(s.lastPensionMonth || '') === _period && String(s.lastPensionStatus || '') === 'Approved')
+                            || hasPensionPayoutForPeriod(s, _period);
+                        return `
                         <tr style="border-bottom:1px solid #e4e4e7; ${s._prio === 'High' ? 'background:#fef2f2;' : ''}">
                             <td style="padding:10px; font-weight:600; color:#1e293b;">${escHtml(s.name || 'Senior Citizen')}</td>
                             <td style="padding:10px; color:#3f3f46;">${escHtml(s.seniorId || 'N/A')}</td>
@@ -2557,9 +2590,18 @@ function renderPensionSetup(usersData) {
                             <td style="padding:10px; font-weight:800; color:#1e293b;">₱${Number(_q).toLocaleString()}</td>
                             <td style="padding:10px; color:#3f3f46;">${s.pensionSetAt ? new Date(Number(s.pensionSetAt)).toLocaleDateString() : '—'}</td>
                             <td style="padding:10px; color:#3f3f46;">${s.pensionSetBy ? escHtml(s.pensionSetBy) : '—'}</td>
-                            <td style="padding:10px; white-space:nowrap;">
-                                <button style="background:#ffffff; color:#b91c1c; border:1px solid #b91c1c; padding:6px 12px; border-radius:4px; font-weight:600; font-size:0.82rem; cursor:pointer;"
-                                    data-action="pension-remove" data-uid="${s.uid}" data-seniorname="${escHtml(s.name || '')}" title="Remove pension setup">Remove</button>
+                            <td class="pb-pension-actions" style="padding:8px 10px;">
+                                <div style="display:flex; flex-direction:column; gap:6px; min-width:96px;">
+                                    ${_approved
+                                        ? `<span title="Pension payout approved for ${escHtml(_periodLabel)}" style="display:inline-flex; align-items:center; justify-content:center; gap:5px; background:#f0fdf4; color:#166534; border:1px solid #86efac; padding:6px 8px; border-radius:4px; font-weight:700; font-size:0.8rem;">
+                                            <i class="fas fa-check"></i>Approved
+                                        </span>`
+                                        : `<button style="background:#166534; color:#ffffff; border:none; padding:6px 8px; border-radius:4px; font-weight:600; font-size:0.8rem; cursor:pointer;"
+                                            data-action="pension-approve" data-uid="${s.uid}" data-seniorname="${escHtml(s.name || '')}"
+                                            data-period="${_period}" title="Approve the ${escHtml(_periodLabel)} pension payout">Approve</button>`}
+                                    <button style="background:#ffffff; color:#b91c1c; border:1px solid #b91c1c; padding:6px 8px; border-radius:4px; font-weight:600; font-size:0.8rem; cursor:pointer;"
+                                        data-action="pension-remove" data-uid="${s.uid}" data-seniorname="${escHtml(s.name || '')}" title="Remove pension setup">Remove</button>
+                                </div>
                             </td>
                         </tr>`; }).join('')}
                     </tbody>
@@ -2625,6 +2667,106 @@ function renderPensionSetup(usersData) {
                     scNotify('error', 'Failed to grant pension: ' + err.message);
                 }
             });
+        };
+    });
+
+    // Approve this month's pension payout. This is the missing pension-side
+    // counterpart to the assistance "Mark as Claimed" action: it records the
+    // payout in the senior's benefits/history, updates lastPensionMonth so the
+    // Admin "Pending Monthly Pensions" count goes down, logs the transaction,
+    // and notifies the senior in-app / e-mail / SMS.
+    document.querySelectorAll('[data-action="pension-approve"]').forEach(btn => {
+        btn.onclick = async () => {
+            const uid = btn.dataset.uid;
+            const seniorName = btn.dataset.seniorname || 'senior';
+            const periodKey = /^\d{4}-\d{2}$/.test(String(btn.dataset.period || ''))
+                ? String(btn.dataset.period)
+                : currentPensionPeriodKey();
+            const periodLabel = pensionPeriodLabel(periodKey);
+            try {
+                // Re-check the live senior record so a stale board can never
+                // approve a pension for an archived / deceased / suspended
+                // account or use amounts that have since changed.
+                const seniorSnap = await get(ref(db, 'users/' + uid));
+                if (!seniorSnap.exists()) {
+                    scNotify('error', 'Senior record not found. Refresh the board and try again.');
+                    return;
+                }
+                const seniorNow = seniorSnap.val() || {};
+                if (String(seniorNow.lifeStatus || '') === 'Deceased' || String(seniorNow.status || '') === 'Deceased') {
+                    scNotify('error', 'This senior have passed away, please go to OSCA if you think this is an error');
+                    return;
+                }
+                if (seniorNow.pensionSuspended) {
+                    scNotify('error', 'Pension is currently suspended for this senior. Reactivate it before approving a payout.');
+                    return;
+                }
+                if ((String(seniorNow.lastPensionMonth || '') === periodKey && String(seniorNow.lastPensionStatus || '') === 'Approved')
+                    || hasPensionPayoutForPeriod(seniorNow, periodKey)) {
+                    scNotify('info', `The ${periodLabel} pension payout for ${seniorName} is already approved.`);
+                    return;
+                }
+                const local = getLocalPensionOf(seniorNow);
+                const national = getNationalPensionOf(seniorNow);
+                const qtr = local * 3 + national;
+                if (!(qtr > 0)) {
+                    scNotify('error', 'This senior has no pension amount configured. Grant a pension first.');
+                    return;
+                }
+                const payoutParts = [
+                    local > 0 ? `Local ₱${local.toLocaleString()}/month` : '',
+                    national > 0 ? `National ₱${national.toLocaleString()}/quarter` : ''
+                ].filter(Boolean).join(' + ');
+                confirmAction(`Approve ${seniorName}'s pension payout for ${periodLabel}? ${payoutParts} (quarterly total ₱${qtr.toLocaleString()}). This records the payout and notifies the senior.`, async () => {
+                    const originalHtml = btn.innerHTML;
+                    btn.disabled = true;
+                    btn.innerHTML = '<i class="fas fa-spinner fa-spin" style="margin-right:4px;"></i>Approving...';
+                    try {
+                        const now = Date.now();
+                        const actorName = (window.currentStaffName || '').trim() || 'OSCA Staff';
+                        const refNumber = generateReferenceNumber('PEN');
+                        const benefitKey = 'pension_payout_' + periodKey;
+                        const updates = {};
+                        updates[`users/${uid}/benefits/${benefitKey}`] = {
+                            title: pensionPayoutTitle(local, national),
+                            amount: 'PHP ' + qtr.toLocaleString(),
+                            status: 'Approved',
+                            refNumber: refNumber,
+                            period: periodKey,
+                            periodLabel: periodLabel,
+                            localAmount: local,
+                            nationalAmount: national,
+                            quarterlyTotal: qtr,
+                            approvedAt: now,
+                            approvedBy: actorName,
+                            createdAt: now
+                        };
+                        updates[`users/${uid}/lastPensionMonth`] = periodKey;
+                        updates[`users/${uid}/lastPensionStatus`] = 'Approved';
+                        updates[`users/${uid}/lastPensionAmount`] = qtr;
+                        updates[`users/${uid}/lastPensionRef`] = refNumber;
+                        updates[`users/${uid}/lastPensionApprovedAt`] = now;
+                        updates[`users/${uid}/lastPensionApprovedBy`] = actorName;
+                        await update(ref(db), updates);
+                        await logTransaction('Pension Approved', seniorName, uid, qtr, refNumber,
+                            `Approved pension payout for ${periodLabel}`);
+                        await logPensionAudit('PENSION_PAYOUT_APPROVED', uid, seniorName, qtr,
+                            `Approved ${periodLabel} pension payout (${payoutParts}) for ${seniorName}. Ref: ${refNumber}`);
+                        sendSeniorPensionStatus(seniors, uid, seniorName,
+                            { localAmount: local, nationalAmount: national, quarterlyTotal: qtr, period: periodKey },
+                            'pension_released');
+                        scNotify('success', `${periodLabel} pension payout approved for ${seniorName}. Ref: ${refNumber}`);
+                    } catch (err) {
+                        console.error('Pension approval error:', err);
+                        btn.disabled = false;
+                        btn.innerHTML = originalHtml;
+                        scNotify('error', 'Failed to approve pension: ' + err.message);
+                    }
+                });
+            } catch (err) {
+                console.error('Pension approval check error:', err);
+                scNotify('error', 'Failed to load the senior record: ' + err.message);
+            }
         };
     });
 
@@ -4434,6 +4576,51 @@ window.deleteFragmentedRecord = function(uid) {
     );
 };
 
+// Returns the critical identity fields a senior record still needs.
+// Kept in one place so the scan, the list badge and the edit form agree.
+function getFragmentMissingFields(record) {
+    const missing = [];
+    if (!String((record && record.name) || '').trim()) missing.push('Name');
+    if (!String((record && record.dob) || '').trim()) missing.push('Birthdate');
+    if (!String((record && record.seniorId) || '').trim()) missing.push('OSCA Senior ID');
+    return missing;
+}
+
+// Open the Manage Seniors edit form for a fragmented record. The editor
+// (manage-seniors.js) highlights the field(s) reported here and keeps the
+// record in the fragmented list until every requirement is filled in.
+window.editFragmentedRecord = function(uid) {
+    const rec = getSeniorRecords().all.find(s => s.uid === uid)
+        || (window.lastUsersData && window.lastUsersData[uid]
+            ? { uid, ...window.lastUsersData[uid] }
+            : null);
+    if (!rec) {
+        scNotify('error', 'That record could not be found. Run the integrity scan again.');
+        return;
+    }
+    if (typeof window.openFragmentedRecordEditor !== 'function') {
+        scNotify('error', 'The edit form is unavailable. Please reload the page and try again.');
+        return;
+    }
+    window.openFragmentedRecordEditor(uid, getFragmentMissingFields(rec));
+};
+
+// Called by the editor after a successful save. Updates the local snapshot and
+// re-scans immediately so the fixed record disappears from the fragmented list
+// without waiting for the next manual scan.
+window.completeFragmentedRecordFix = function(uid, fields) {
+    const stored = window.lastUsersData && window.lastUsersData[uid];
+    if (stored && fields) {
+        if (fields.name !== undefined) stored.name = fields.name;
+        if (fields.seniorId !== undefined) stored.seniorId = fields.seniorId;
+        if (fields.dob !== undefined) stored.dob = fields.dob;
+    }
+    if (window._integrityResults) {
+        window._integrityResults = findIntegrityIssues();
+        renderIntegrityResults(window._integrityResults);
+    }
+};
+
 function renderIntegrityResults(results) {
     const container = document.getElementById('integrityResultsContainer');
     if (!container || !results) return;
@@ -4489,6 +4676,7 @@ function renderIntegrityResults(results) {
                 </div>
                 <div style="display:flex; gap:6px; flex-shrink:0;">
                     ${!isArchivedSenior(record) ? `<button onclick="archiveDuplicateRecord('${record.uid}', '')" style="background:#fef3c7; color:#92400e; border:1px solid #fde68a; padding:6px 12px; border-radius:6px; font-weight:700; font-size:0.78rem; cursor:pointer;">Archive</button>` : ''}
+                    <button onclick="editFragmentedRecord('${record.uid}')" title="Open the edit form — the missing requirements will be highlighted" style="background:#eff6ff; color:#1d4ed8; border:1px solid #bfdbfe; padding:6px 12px; border-radius:6px; font-weight:700; font-size:0.78rem; cursor:pointer;">Edit</button>
                     ${canDelete ? `<button onclick="deleteFragmentedRecord('${record.uid}')" style="background:#fee2e2; color:#b91c1c; border:1px solid #fca5a5; padding:6px 12px; border-radius:6px; font-weight:700; font-size:0.78rem; cursor:pointer;">Delete</button>` : ''}
                 </div>
             </div>`;
@@ -4536,17 +4724,9 @@ function findIntegrityIssues() {
     });
 
     // Fragmented records: missing critical identity fields
-    const fragmented = all.filter(r => {
-        return !String(r.name || '').trim() ||
-               !String(r.dob || '').trim() ||
-               !String(r.seniorId || '').trim();
-    }).map(r => {
-        const missing = [];
-        if (!String(r.name || '').trim()) missing.push('Name');
-        if (!String(r.dob || '').trim()) missing.push('Birthdate');
-        if (!String(r.seniorId || '').trim()) missing.push('OSCA Senior ID');
-        return { record: r, missing };
-    });
+    const fragmented = all
+        .map(r => ({ record: r, missing: getFragmentMissingFields(r) }))
+        .filter(entry => entry.missing.length > 0);
 
     return { duplicateGroups, fragmented, scannedAt: Date.now(), scannedTotal: all.length };
 }

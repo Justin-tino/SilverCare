@@ -48,9 +48,23 @@
 /* Pension tables: keep native table width but never bleed — scroll inside card */
 #pensionSetupContainer.pb-wide-table table { min-width: 940px; width: 100%; }
 #pensionConfiguredContainer.pb-wide-table table { min-width: 760px; width: 100%; }
+#pensionConfiguredContainer table th,
+#pensionConfiguredContainer table td { padding-left: 8px !important; padding-right: 8px !important; }
 #pensionSetupContainer.pb-wide-table,
 #pensionConfiguredContainer.pb-wide-table { overflow-x: auto; -webkit-overflow-scrolling: touch; }
 #pensionSetupContainer.pb-wide-table input[type="number"] { max-width: 100%; }
+/* Keep Approve / Remove reachable even when the configured-pension table
+   scrolls horizontally on narrower employee screens. */
+#pensionConfiguredContainer table th.pb-pension-actions,
+#pensionConfiguredContainer table td.pb-pension-actions {
+  position: sticky;
+  right: 0;
+  background: #ffffff;
+  z-index: 2;
+  box-shadow: -6px 0 8px rgba(15, 23, 42, 0.06);
+}
+#pensionConfiguredContainer table th.pb-pension-actions { background: #f8fafc; z-index: 4; }
+#pensionConfiguredContainer table tr[style*="fef2f2"] td.pb-pension-actions { background: #fef2f2; }
 /* Claimed pension cards + claim cards: never overflow their own column */
 #pensionClaimedContainer > div,
 #claimsPayoutContainer > div,

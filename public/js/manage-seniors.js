@@ -180,7 +180,156 @@ function msHideNotice() {
   const box = document.getElementById('seniorEditNotice');
   if (box) { box.style.display = 'none'; box.textContent = ''; }
 }
+
+// ── Fragmented-record edit mode ─────────────────────────────────────────────
+// Opened from Archive → Fragmented / incomplete records. The missing identity
+// fields are highlighted in red and the save button becomes "Confirm". The
+// record stays in the fragmented list until every declared requirement is
+// filled in and the save succeeds.
+const msFragmentedFieldIds = {
+  'Name': 'seniorEditName',
+  'Birthdate': 'seniorEditDob',
+  'OSCA Senior ID': 'seniorEditSeniorId'
+};
+let msFragmentedWatchersBound = false;
+
+function msHighlightFragmentedField(fieldLabel) {
+  const el = document.getElementById(msFragmentedFieldIds[fieldLabel]);
+  if (!el) return;
+  if (el.dataset.fragmentedHighlight !== '1') {
+    el.dataset.fragmentedHighlight = '1';
+    el.dataset.fragmentedOrigBorder = el.style.border || '';
+    el.dataset.fragmentedOrigBackground = el.style.background || '';
+    el.dataset.fragmentedOrigBoxShadow = el.style.boxShadow || '';
+  }
+  el.style.border = '2px solid #dc2626';
+  el.style.background = '#fef2f2';
+  el.style.boxShadow = '0 0 0 3px rgba(220,38,38,0.14)';
+  const field = el.closest('div');
+  const labelEl = field ? field.querySelector('label') : null;
+  if (labelEl) {
+    if (labelEl.dataset.fragmentedHighlight !== '1') {
+      labelEl.dataset.fragmentedHighlight = '1';
+      labelEl.dataset.fragmentedOrigColor = labelEl.style.color || '';
+    }
+    labelEl.style.color = '#b91c1c';
+  }
+}
+
+function msClearFragmentedField(fieldLabel) {
+  const el = document.getElementById(msFragmentedFieldIds[fieldLabel]);
+  if (!el) return;
+  if (el.dataset.fragmentedHighlight === '1') {
+    el.style.border = el.dataset.fragmentedOrigBorder || '';
+    el.style.background = el.dataset.fragmentedOrigBackground || '';
+    el.style.boxShadow = el.dataset.fragmentedOrigBoxShadow || '';
+    delete el.dataset.fragmentedHighlight;
+    delete el.dataset.fragmentedOrigBorder;
+    delete el.dataset.fragmentedOrigBackground;
+    delete el.dataset.fragmentedOrigBoxShadow;
+  }
+  const field = el.closest('div');
+  const labelEl = field ? field.querySelector('label') : null;
+  if (labelEl && labelEl.dataset.fragmentedHighlight === '1') {
+    labelEl.style.color = labelEl.dataset.fragmentedOrigColor || '';
+    delete labelEl.dataset.fragmentedHighlight;
+    delete labelEl.dataset.fragmentedOrigColor;
+  }
+}
+
+function msResetFragmentedEditor() {
+  Object.keys(msFragmentedFieldIds).forEach(msClearFragmentedField);
+  const banner = document.getElementById('fragmentedEditBanner');
+  if (banner) { banner.style.display = 'none'; banner.textContent = ''; }
+  const saveBtn = document.getElementById('seniorEditSaveBtn');
+  if (saveBtn) { saveBtn.innerHTML = 'Save Changes'; saveBtn.title = ''; }
+  window._fragmentedEditUid = null;
+  window._fragmentedEditMissing = [];
+}
+
+/** Requirements that were missing when the editor opened and are still empty. */
+function msStillMissingFragmented() {
+  const declared = Array.isArray(window._fragmentedEditMissing) ? window._fragmentedEditMissing : [];
+  const missing = [];
+  if (declared.indexOf('Name') > -1 && !msVal('seniorEditName').trim()) missing.push('Name');
+  if (declared.indexOf('Birthdate') > -1 && !msVal('seniorEditDob').trim()) missing.push('Birthdate');
+  if (declared.indexOf('OSCA Senior ID') > -1 && !msVal('seniorEditSeniorId').trim()) missing.push('OSCA Senior ID');
+  return missing;
+}
+
+function msRenderFragmentedBanner() {
+  const banner = document.getElementById('fragmentedEditBanner');
+  if (!banner) return;
+  if (!window._fragmentedEditUid) {
+    banner.style.display = 'none';
+    banner.textContent = '';
+    return;
+  }
+  const missing = msStillMissingFragmented();
+  if (missing.length) {
+    banner.style.background = '#fef2f2';
+    banner.style.border = '1px solid #fecaca';
+    banner.style.color = '#991b1b';
+    banner.innerHTML = '<i class="fas fa-triangle-exclamation" style="margin-right:6px;"></i>'
+      + 'This record is incomplete. Fill in the highlighted required field(s): <strong>'
+      + missing.map(msEsc).join(', ') + '</strong>.';
+  } else {
+    banner.style.background = '#f0fdf4';
+    banner.style.border = '1px solid #bbf7d0';
+    banner.style.color = '#15803d';
+    banner.innerHTML = '<i class="fas fa-circle-check" style="margin-right:6px;"></i>'
+      + 'All missing requirements are filled in. Click <strong>Confirm</strong> to save and remove this record from the Fragmented / Incomplete records list.';
+  }
+  banner.style.display = 'block';
+}
+
+function msRefreshFragmentedEditor() {
+  if (!window._fragmentedEditUid) return;
+  const missing = msStillMissingFragmented();
+  Object.keys(msFragmentedFieldIds).forEach((fieldLabel) => {
+    if (missing.indexOf(fieldLabel) > -1) msHighlightFragmentedField(fieldLabel);
+    else msClearFragmentedField(fieldLabel);
+  });
+  msRenderFragmentedBanner();
+}
+
+function msBindFragmentedWatchers() {
+  if (msFragmentedWatchersBound) return;
+  msFragmentedWatchersBound = true;
+  Object.values(msFragmentedFieldIds).forEach((id) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    const refresh = () => { if (window._fragmentedEditUid) msRefreshFragmentedEditor(); };
+    el.addEventListener('input', refresh);
+    el.addEventListener('change', refresh);
+  });
+}
+
+/** Opens the Manage Seniors editor in fragmented-record repair mode. */
+window.openFragmentedRecordEditor = function (uid, missing) {
+  window.openManageSeniorsEditor(uid);
+  const modal = document.getElementById('manageSeniorsEditModal');
+  if (!modal || modal.style.display !== 'flex') return;
+  const record = ((window.lastUsersData || {})[uid]) || {};
+  window._fragmentedEditUid = uid;
+  window._fragmentedEditMissing = (Array.isArray(missing) ? missing : [])
+    .filter((label) => msFragmentedFieldIds[label]);
+  msBindFragmentedWatchers();
+  const sub = document.getElementById('seniorEditSub');
+  if (sub) {
+    sub.textContent = 'Fix incomplete record: ' + (record.name || record.email || uid)
+      + ' — fill in the highlighted required fields.';
+  }
+  const saveBtn = document.getElementById('seniorEditSaveBtn');
+  if (saveBtn) {
+    saveBtn.innerHTML = '<i class="fas fa-check" style="margin-right:6px;"></i>Confirm';
+    saveBtn.title = 'Save the missing requirements and remove this record from the fragmented list';
+  }
+  msRefreshFragmentedEditor();
+};
+
 window.openManageSeniorsEditor = function (uid) {
+  msResetFragmentedEditor();
   const found = (manageSeniorsCache || []).find(e => e.uid === uid)
     || (((window.lastUsersData || {})[uid] && { uid, ...(window.lastUsersData[uid]) }) || null);
   if (!found || found.role !== 'senior') { msNotify('error', 'Senior account not found.'); return; }
@@ -215,6 +364,7 @@ window.closeManageSeniorsEditor = function () {
   if (modal) modal.style.display = 'none';
   document.body.style.overflow = '';
   msHideNotice();
+  msResetFragmentedEditor();
 };
 // ── Deceased (Archive) action ────────────────────────────────────────────────
 // Marks a senior account as DECEASED when the senior citizen has passed away.
@@ -315,11 +465,22 @@ async function msSyncSupabase(uid) {
 window.saveManageSeniorsEdits = async function () {
   const uid = String(msVal('seniorEditUid') || '').trim();
   if (!uid) { msShowNotice('No senior account selected.'); return; }
+  const wasFragmented = window._fragmentedEditUid === uid;
   const name = String(msVal('seniorEditName') || '').trim();
   const seniorId = String(msVal('seniorEditSeniorId') || '').trim();
+  const dob = String(msVal('seniorEditDob') || '').trim();
+  // Fragmented-record repair: block confirm until every missing requirement
+  // that was highlighted when the editor opened has been filled in.
+  if (window._fragmentedEditUid === uid) {
+    const stillMissing = msStillMissingFragmented();
+    if (stillMissing.length) {
+      msShowNotice('This record is still incomplete. Fill in the highlighted field(s): ' + stillMissing.join(', ') + '.');
+      msRefreshFragmentedEditor();
+      return;
+    }
+  }
   if (!name) { msShowNotice('Full name is required.'); return; }
   if (!seniorId) { msShowNotice('Senior Citizen ID is required.'); return; }
-  const dob = String(msVal('seniorEditDob') || '').trim();
   if (dob) {
     const b = new Date(dob); const now = new Date();
     if (isNaN(b.getTime()) || b > now) { msShowNotice('Date of birth is not valid.'); return; }
@@ -367,11 +528,20 @@ window.saveManageSeniorsEdits = async function () {
     await msLogAudit('SENIOR_INFO_UPDATED', uid, name,
       'Employee updated senior account info of ' + name + ' (' + seniorId + ')' + (changed ? ' — changed: ' + changed : ''));
     await msSyncSupabase(uid);
+    if (wasFragmented && typeof window.completeFragmentedRecordFix === 'function') {
+      window.completeFragmentedRecordFix(uid, { name, seniorId, dob: dob || null });
+    }
     manageSeniorsCache = msCollectSeniors();
     renderManageSeniorsList();
-    msShowNotice('Senior account info updated successfully.', 'ok');
-    msNotify('success', 'Senior account info updated for ' + name + '.');
-    setTimeout(() => { window.closeManageSeniorsEditor(); }, 900);
+    if (wasFragmented) {
+      msShowNotice('All missing requirements are complete. This record was removed from the Fragmented / Incomplete records list.', 'ok');
+      msNotify('success', name + ' is now complete and was removed from the fragmented records list.');
+      setTimeout(() => { window.closeManageSeniorsEditor(); }, 1200);
+    } else {
+      msShowNotice('Senior account info updated successfully.', 'ok');
+      msNotify('success', 'Senior account info updated for ' + name + '.');
+      setTimeout(() => { window.closeManageSeniorsEditor(); }, 900);
+    }
   } catch (err) {
     console.error('Manage Seniors save failed:', err);
     msShowNotice(err && err.message ? err.message : 'Failed to save changes. Please try again.');
